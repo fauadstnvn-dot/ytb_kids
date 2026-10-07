@@ -8,11 +8,25 @@ on:
         type: boolean
         default: false
   schedule:
-    # Mỗi ngày 1 lần = 1 kịch bản = 1 video. Giờ UTC.
+    # Mỗi ngày 3 lần = 3 kịch bản = 3 video, nhắm 3 khung giờ vàng của trẻ em nói tiếng Anh. Giờ UTC.
+    # Đăng ~1-2 giờ TRƯỚC giờ cao điểm để YouTube kịp xử lý HD/4K và đẩy đề xuất khi trẻ bắt đầu xem.
+    # Phút 07 để tránh tắc nghẽn đầu giờ của GitHub (lịch đúng :00 hay bị trễ).
+
+    # Mốc 1 - Úc / New Zealand / Philippines / Singapore / Ấn Độ (sau giờ học):
+    # 07:07 UTC = 5:07 PM Sydney (AEST) / 6:07 PM (AEDT), 7:07 PM Auckland, 3:07 PM Manila & Singapore,
+    # 12:37 PM Ấn Độ, 8:07 AM London (cuối tuần trẻ Anh xem buổi sáng). = 14:07 giờ Việt Nam.
+    - cron: "7 7 * * *"
+
+    # Mốc 2 - Mỹ bờ Đông + Anh/châu Âu:
     # 18:07 UTC = 2:07 PM New York (EDT) / 1:07 PM EST, 11:07 AM Los Angeles, 7:07 PM London,
     # tức ~1-2 giờ trước khung giờ trẻ em Mỹ xem nhiều nhất sau giờ học (3-6 PM) và trước giờ tối châu Âu.
-    # Phút 07 để tránh tắc nghẽn đầu giờ của GitHub (lịch đúng :00 hay bị trễ). = 01:07 sáng giờ Việt Nam.
+    # = 01:07 sáng giờ Việt Nam.
     - cron: "7 18 * * *"
+
+    # Mốc 3 - Mỹ bờ Tây / Canada + giờ tối gia đình bờ Đông (trước giờ ngủ, bố mẹ mở cho con xem):
+    # 22:07 UTC = 3:07 PM Los Angeles & Vancouver (PDT) / 2:07 PM PST, 6:07 PM New York (EDT),
+    # 9:07 AM Sydney hôm sau (cuối tuần). = 05:07 sáng giờ Việt Nam.
+    - cron: "7 22 * * *"
 
 # Chỉ 1 lượt chạy tại 1 thời điểm (lượt sau phải chờ lượt trước xong) -> không bao giờ upload 2 video song song.
 concurrency:
