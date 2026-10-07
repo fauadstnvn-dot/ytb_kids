@@ -1,0 +1,81 @@
+name: Story video -> YouTube
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Chỉ dựng video (không upload, không xoá kịch bản)"
+        type: boolean
+        default: false
+  schedule:
+    # Mỗi ngày 1 lần = 1 kịch bản = 1 video. Giờ UTC.
+    # 18:07 UTC = 2:07 PM New York (EDT) / 1:07 PM EST, 11:07 AM Los Angeles, 7:07 PM London,
+    # tức ~1-2 giờ trước khung giờ trẻ em Mỹ xem nhiều nhất sau giờ học (3-6 PM) và trước giờ tối châu Âu.
+    # Phút 07 để tránh tắc nghẽn đầu giờ của GitHub (lịch đúng :00 hay bị trễ). = 01:07 sáng giờ Việt Nam.
+    - cron: "7 18 * * *"
+
+# Chỉ 1 lượt chạy tại 1 thời điểm (lượt sau phải chờ lượt trước xong) -> không bao giờ upload 2 video song song.
+concurrency:
+  group: story-video
+  cancel-in-progress: false
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        working-directory: bot
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: bot/package-lock.json
+
+      - name: Cài ffmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          ffmpeg-version: release
+
+      - name: Cài font cho phụ đề
+        run: |
+          sudo apt-get install -y --no-install-recommends fonts-noto-core fonts-dejavu-core >/dev/null 2>&1 \
+            || (sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends fonts-noto-core fonts-dejavu-core)
+
+      - name: Cài thư viện
+        run: npm ci --no-audit --no-fund
+
+      - name: Kiểm tra công cụ
+        run: |
+          node -v
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
+
+      - name: Dựng video và upload YouTube
+        env:
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USER: ${{ secrets.FTP_USER }}
+          FTP_PASS: ${{ secrets.FTP_PASS }}
+          FTP_PORT: ${{ secrets.FTP_PORT }}
+          FTP_SECURE: ${{ secrets.FTP_SECURE }}
+          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          STORY_DIR: /nangmua.vn/echcon/list_kb/
+          MUSIC_DIR: /nangmua.vn/echcon/music/
+          VIDEO_WIDTH: "2560"
+          VIDEO_HEIGHT: "1440"
+          VIDEO_FPS: "30"
+          DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+        run: node src/index.mjs
+
+      - name: Lưu video thử (DRY_RUN)
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-dry-run
+          path: bot/output.mp4
+          retention-days: 3
