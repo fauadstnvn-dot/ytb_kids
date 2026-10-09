@@ -41,16 +41,43 @@ function explain({ reasons, message }) {
   return message;
 }
 
-export async function getAccessToken() {
+/**
+ * Lỗi gắn với 1 bộ secret cụ thể (hết quota, token bị thu hồi, sai client...).
+ * Gặp lỗi này thì đổi sang dòng secret khác trong DB; mọi lỗi khác vẫn dừng ngay.
+ */
+export class CredentialError extends StepError {
+  constructor(kind, message) {
+    super(STEP, message);
+    this.name = "CredentialError";
+    this.kind = kind;
+  }
+}
+
+const QUOTA_REASONS = ["quotaExceeded", "dailyLimitExceeded", "uploadLimitExceeded", "rateLimitExceeded", "userRateLimitExceeded"];
+const ACCOUNT_REASONS = ["authError", "forbidden", "insufficientPermissions", "youtubeSignupRequired"];
+
+function credentialErrorFrom(status, info, prefix) {
+  const text = `${prefix} — ${info.summary}\nNguyên nhân: ${explain(info)}`;
+  if (info.reasons.some((r) => QUOTA_REASONS.includes(r)) || (status === 403 && /quota|limit/i.test(info.message))) {
+    return new CredentialError("quota", text);
+  }
+  if (status === 401 || info.reasons.some((r) => ACCOUNT_REASONS.includes(r))) {
+    return new CredentialError("account", text);
+  }
+  return null;
+}
+
+/** Đổi refresh token lấy access token. Trả về nguyên response của Google để lưu lại vào DB. */
+export async function getAccessToken({ clientId, clientSecret, refreshToken }) {
   let res;
   try {
     res = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        client_id: process.env.YT_CLIENT_ID.trim(),
-        client_secret: process.env.YT_CLIENT_SECRET.trim(),
-        refresh_token: process.env.YT_REFRESH_TOKEN.trim(),
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
         grant_type: "refresh_token",
       }),
       signal: AbortSignal.timeout(30_000),
@@ -61,15 +88,20 @@ export async function getAccessToken() {
   const { json, text } = await readJson(res);
   if (!res.ok || !json?.access_token) {
     const code = json?.error;
-    const hint =
-      code === "invalid_grant"
-        ? "Refresh token đã hết hạn hoặc bị thu hồi. Nếu OAuth consent screen đang ở chế độ \"Testing\", token chỉ sống 7 ngày — hãy chuyển sang \"In production\" rồi chạy lại `npm run token` để lấy YT_REFRESH_TOKEN mới."
-        : code === "invalid_client" || code === "unauthorized_client"
-          ? "YT_CLIENT_ID / YT_CLIENT_SECRET sai hoặc không khớp với client đã dùng để tạo refresh token."
-          : "Kiểm tra lại các secret YT_CLIENT_ID, YT_CLIENT_SECRET, YT_REFRESH_TOKEN.";
-    throw new StepError(STEP, `Lấy access token thất bại (HTTP ${res.status}: ${json?.error_description || code || text.slice(0, 300)}). ${hint}`);
+    const detail = `Lấy access token thất bại (HTTP ${res.status}: ${json?.error_description || code || text.slice(0, 300)})`;
+    if (code === "invalid_grant") {
+      throw new CredentialError(
+        "account",
+        `${detail}. Refresh token đã hết hạn hoặc bị thu hồi. Nếu OAuth consent screen đang ở chế độ "Testing", token chỉ sống 7 ngày — hãy chuyển sang "In production" rồi chạy lại \`npm run token\` và cập nhật lại cột token trong DB.`
+      );
+    }
+    if (code === "invalid_client" || code === "unauthorized_client") {
+      throw new CredentialError("account", `${detail}. client_id / client_secret sai hoặc không khớp với client đã dùng để tạo refresh token.`);
+    }
+    if (res.status === 429) throw new CredentialError("quota", `${detail}. Google OAuth đang giới hạn tần suất.`);
+    throw new StepError(STEP, `${detail}.`);
   }
-  return json.access_token;
+  return json;
 }
 
 async function initiate(token, meta, size) {
@@ -102,7 +134,8 @@ async function initiate(token, meta, size) {
   const { json, text } = await readJson(res);
   const info = describeApiError(res.status, json, text);
   if (isTagError(info)) throw new TagError(info.summary);
-  throw new StepError(STEP, `Khởi tạo upload thất bại — ${info.summary}\nNguyên nhân: ${explain(info)}`);
+  throw credentialErrorFrom(res.status, info, "Khởi tạo upload thất bại") ||
+    new StepError(STEP, `Khởi tạo upload thất bại — ${info.summary}\nNguyên nhân: ${explain(info)}`);
 }
 
 async function queryOffset(token, uploadUrl, size) {
@@ -174,7 +207,8 @@ async function sendFile(token, uploadUrl, file, size) {
         const { json, text } = await readJson(res);
         const info = describeApiError(res.status, json, text);
         if (isTagError(info)) throw new TagError(info.summary);
-        throw new StepError(STEP, `Upload dữ liệu video thất bại — ${info.summary}\nNguyên nhân: ${explain(info)}`);
+        throw credentialErrorFrom(res.status, info, "Upload dữ liệu video thất bại") ||
+          new StepError(STEP, `Upload dữ liệu video thất bại — ${info.summary}\nNguyên nhân: ${explain(info)}`);
       }
 
       const pct = Math.floor((offset / size) * 100);
@@ -207,13 +241,13 @@ function nextTags(tags, failedAttempt) {
 }
 
 /**
- * Upload đúng 1 video. Lỗi tag bị YouTube từ chối trước khi video được tạo,
- * nên thử lại với tag mới không sinh video trùng. Lỗi khác -> dừng và báo nguyên nhân.
+ * Upload đúng 1 video bằng 1 access token. Lỗi tag bị YouTube từ chối trước khi video được tạo,
+ * nên thử lại với tag mới không sinh video trùng. Lỗi quota/tài khoản -> CredentialError để đổi secret.
+ * Lỗi khác -> dừng và báo nguyên nhân.
  */
-export async function uploadVideo(file, meta) {
+export async function uploadVideo(file, meta, token) {
   const size = fs.statSync(file).size;
-  const token = await getAccessToken();
-  log.info(`Đã lấy access token. Kích thước video: ${formatBytes(size)}`);
+  log.info(`Kích thước video: ${formatBytes(size)}`);
   log.info(`Tiêu đề: ${meta.title}`);
   log.info(`Danh mục: Film & Animation | Dành cho trẻ em: Có | Chế độ: Public`);
 
