@@ -69,3 +69,17 @@ export async function deleteRemote(remotePath, step) {
     client.close();
   }
 }
+
+/** Tìm file .mp3 trùng tên (không phân biệt hoa/thường, bỏ đuôi) với kịch bản trong thư mục `dir`. Không có thì trả về null. */
+export async function findMatchingMp3(client, dir, storyBaseName) {
+  let items;
+  try {
+    items = await client.list(dir);
+  } catch (e) {
+    log.warn(`Không đọc được thư mục mp3 riêng "${dir}": ${e.message}. Dùng Google TTS.`);
+    return null;
+  }
+  const want = storyBaseName.trim().toLowerCase();
+  const hit = items.find((f) => f.isFile && f.name.toLowerCase().endsWith(".mp3") && f.name.slice(0, -4).trim().toLowerCase() === want);
+  return hit ? { name: hit.name, size: hit.size, remotePath: path.posix.join(dir, hit.name) } : null;
+}
