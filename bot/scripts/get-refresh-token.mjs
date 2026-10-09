@@ -1,4 +1,4 @@
-// Chạy MỘT LẦN trên máy tính của bạn để lấy YT_REFRESH_TOKEN:
+// Chạy trên máy tính của bạn để lấy token cho 1 dòng trong bảng tb_bao_secret:
 //   YT_CLIENT_ID=xxx YT_CLIENT_SECRET=yyy npm run token
 // Trong Google Cloud Console, OAuth client loại "Desktop app" (khuyên dùng),
 // hoặc loại "Web application" có Authorized redirect URI = http://localhost:8765
@@ -47,8 +47,8 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
   if (json.refresh_token) {
     res.end("Đã lấy refresh token. Quay lại cửa sổ terminal.");
-    console.log("\n=== Lưu giá trị dưới đây vào GitHub Secret YT_REFRESH_TOKEN ===\n");
-    console.log(json.refresh_token);
+    console.log("\n=== Dán JSON dưới đây vào cột token_kid của dòng tương ứng trong tb_bao_secret ===\n");
+    console.log(JSON.stringify({ ...json, saved_at: Math.floor(Date.now() / 1000) }));
     console.log("");
   } else {
     res.end("Lỗi: " + JSON.stringify(json));
