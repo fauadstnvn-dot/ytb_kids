@@ -129,6 +129,66 @@ function truncateBytes(str, maxBytes) {
   return out.trimEnd();
 }
 
+const CHAPTER_LINE = /^\s*[-•*]?\s*[[(]?(?:\d{1,2}:)?\d{1,2}:\d{2}[\])]?\s*[-–—|:]?\s+\S/;
+const MIN_CHAPTER_SEC = 10;
+
+/**
+ * Dựng chapters từ timeline thực tế (sau retimeSegments). YouTube yêu cầu mốc đầu là 0:00
+ * và mỗi chương >= 10 giây, nên cảnh quá ngắn được gộp vào chương kế tiếp.
+ */
+function buildChapterLines(segments) {
+  const retimed = segments.some((s) => s.end > 0);
+  const startOf = (s) => (retimed ? s.start : s.origStart);
+  const last = segments[segments.length - 1];
+  const total = retimed ? last?.end || 0 : (last?.origStart || 0) + (last?.origDuration || 0);
+
+  const chapters = [];
+  segments.forEach((seg, i) => {
+    const start = i === 0 ? 0 : Math.floor(startOf(seg) || 0);
+    const title = String(seg.title).replace(/\s+/g, " ").trim();
+    const prev = chapters[chapters.length - 1];
+    if (prev && start - prev.start < MIN_CHAPTER_SEC) {
+      if (chapters.length > 1) prev.title = title;
+      return;
+    }
+    chapters.push({ start, title });
+  });
+  if (chapters.length > 1 && total - chapters[chapters.length - 1].start < MIN_CHAPTER_SEC) chapters.pop();
+  return chapters.map((c) => `${formatTimestamp(c.start)} ${c.title}`);
+}
+
+/**
+ * Xoá mọi dòng mốc thời gian cũ trong mô tả (kể cả "00:00 ..." do AI viết sẵn) và chèn
+ * chapters mới vào đúng vị trí cũ; nếu chưa có thì chèn trước dòng hashtag.
+ */
+function replaceChapters(desc, segments) {
+  const chapterLines = buildChapterLines(segments);
+  const kept = [];
+  let insertAt = -1;
+  for (const line of desc.split("\n")) {
+    if (CHAPTER_LINE.test(line)) {
+      if (insertAt < 0) insertAt = kept.length;
+      continue;
+    }
+    kept.push(line);
+  }
+  if (!chapterLines.length) return kept.join("\n").trim();
+
+  if (insertAt < 0) {
+    const heading = kept.findIndex((l) => /timestamps|chapters|mốc thời gian/i.test(l));
+    if (heading >= 0) insertAt = heading + 1;
+  }
+  if (insertAt >= 0) {
+    kept.splice(insertAt, 0, ...chapterLines);
+  } else {
+    const block = ["Chapters:", ...chapterLines, ""];
+    const tagLine = kept.findIndex((l) => /^\s*#\S/.test(l));
+    if (tagLine >= 0) kept.splice(tagLine, 0, ...block);
+    else kept.push("", ...block.slice(0, -1));
+  }
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 /**
  * Lấy title/description/tags từ YOUTUBE_METADATA trong file .js.
  * Mốc chương (chapters) được tính lại theo timeline mới sau khi kéo dài cảnh cho giọng đọc.
@@ -139,17 +199,7 @@ export function buildYouTubeMeta(story, fallbackName) {
   title = title.replace(/\s+/g, " ");
   if ([...title].length > 100) title = [...title].slice(0, 100).join("").trimEnd();
 
-  const chapterMap = new Map();
-  for (const seg of story.segments) {
-    chapterMap.set(`${formatTimestamp(seg.origStart)} ${seg.title}`, `${formatTimestamp(seg.start)} ${seg.title}`);
-  }
-  const description = truncateBytes(
-    cleanText(meta.description)
-      .split("\n")
-      .map((line) => chapterMap.get(line.trim()) ?? line)
-      .join("\n"),
-    4900
-  );
+  const description = truncateBytes(replaceChapters(cleanText(meta.description), story.segments), 4900);
 
   const seen = new Set();
   const tags = [];
