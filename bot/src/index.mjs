@@ -1,15 +1,16 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { connectFtp, deleteRemote, download, listFiles, pickRandom } from "./ftp.mjs";
+import { connectFtp, deleteRemote, download, findMatchingMp3, listFiles, pickRandom } from "./ftp.mjs";
 import { buildAudio, renderVideo, validateStory } from "./render.mjs";
 import { buildYouTubeMeta, loadStory, retimeSegments } from "./story.mjs";
 import { synthesizeNarration } from "./tts.mjs";
 import { uploadVideo } from "./youtube.mjs";
-import { StepError, StoryError, envNum, envStr, formatBytes, formatTimestamp, log, requireEnv } from "./utils.mjs";
+import { probeDuration, StepError, StoryError, envNum, envStr, formatBytes, formatTimestamp, log, requireEnv } from "./utils.mjs";
 
 const STORY_DIR = envStr("STORY_DIR", "/nangmua.vn/echcon/list_kb/");
 const MUSIC_DIR = envStr("MUSIC_DIR", "/nangmua.vn/echcon/music/");
+const MP3_DIR = envStr("MP3_DIR", "/nangmua.vn/echcon/list_mp3/");
 const WIDTH = envNum("VIDEO_WIDTH", 2560);
 const HEIGHT = envNum("VIDEO_HEIGHT", 1440);
 const FPS = envNum("VIDEO_FPS", 30);
@@ -58,6 +59,21 @@ async function pickStory(workDir, broken) {
   }
 }
 
+/** Nếu list_mp3 có file trùng tên kịch bản thì tải về và dùng thay cho Google TTS. */
+async function fetchCustomVoice(storyName, workDir) {
+  const ftp = await connectFtp("Đăng nhập FTP");
+  try {
+    const hit = await findMatchingMp3(ftp, MP3_DIR, path.basename(storyName, ".js"));
+    if (!hit) return null;
+    const local = path.join(workDir, "custom-voice.mp3");
+    await download(ftp, hit.remotePath, local, "Tải mp3 giọng đọc riêng");
+    log.info(`Tìm thấy mp3 trùng tên kịch bản: ${hit.name} (${formatBytes(hit.size)}), bỏ qua Google TTS.`);
+    return local;
+  } finally {
+    ftp.close();
+  }
+}
+
 async function buildVideo(storyFile, musicLocal, baseDir, attempt) {
   const workDir = path.join(baseDir, `try-${attempt}`);
   await fs.mkdir(workDir, { recursive: true });
@@ -73,13 +89,23 @@ async function buildVideo(storyFile, musicLocal, baseDir, attempt) {
   log.info(`Tiêu đề YouTube: ${meta.title}`);
   log.info(`Số tag: ${meta.tags.length}`);
 
-  log.step("5. Tạo giọng đọc TTS cho từng cảnh");
-  await synthesizeNarration(story.segments, workDir);
-  const duration = retimeSegments(story.segments);
-  log.info(`Tổng thời lượng sau khi căn theo giọng đọc: ${formatTimestamp(duration)} (${duration.toFixed(1)}s)`);
+  const customVoice = await fetchCustomVoice(storyFile.name, workDir);
+  let duration;
+  if (customVoice) {
+    log.step("5. Dùng mp3 riêng thay cho Google TTS");
+    story.segments.forEach((s) => (s.narration = null));
+    const mp3Duration = await probeDuration(customVoice, "Đọc mp3 giọng đọc riêng");
+    duration = retimeSegments(story.segments, mp3Duration + 1);
+    log.info(`Thời lượng mp3: ${mp3Duration.toFixed(1)}s, video: ${formatTimestamp(duration)} (${duration.toFixed(1)}s)`);
+  } else {
+    log.step("5. Tạo giọng đọc TTS cho từng cảnh");
+    await synthesizeNarration(story.segments, workDir);
+    duration = retimeSegments(story.segments);
+    log.info(`Tổng thời lượng sau khi căn theo giọng đọc: ${formatTimestamp(duration)} (${duration.toFixed(1)}s)`);
+  }
 
   log.step("6. Trộn nhạc nền + giọng đọc");
-  const audio = await buildAudio(story.segments, musicLocal, duration, workDir);
+  const audio = await buildAudio(story.segments, musicLocal, duration, workDir, customVoice);
 
   log.step("7. Dựng video 2K bằng canvas + ffmpeg");
   const video = await renderVideo(story, audio, duration, workDir, { width: WIDTH, height: HEIGHT, fps: FPS });
