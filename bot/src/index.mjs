@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { connectFtp, deleteRemote, download, findMatchingMp3, listFiles, pickRandom } from "./ftp.mjs";
+import { connectFtp, deleteRemote, download, findMatchingMp3, listFiles, normalizeDir, pickRandom } from "./ftp.mjs";
 import { buildAudio, renderVideo, validateStory } from "./render.mjs";
 import { buildYouTubeMeta, loadStory, retimeSegments } from "./story.mjs";
 import { synthesizeNarration } from "./tts.mjs";
@@ -10,9 +10,9 @@ import { uploadWithCredentialPool } from "./publish.mjs";
 import { probeDuration, StepError, StoryError, envNum, envStr, formatBytes, formatTimestamp, log, requireEnv } from "./utils.mjs";
 
 // Đường dẫn FTP lấy từ GitHub Secret, không ghi cứng trong code và không in ra log để người khác không biết vị trí lưu trữ.
-const STORY_DIR = envStr("STORY_DIR", "");
-const MUSIC_DIR = envStr("MUSIC_DIR", "");
-const MP3_DIR = envStr("MP3_DIR", "");
+const STORY_DIR = normalizeDir(envStr("STORY_DIR", ""));
+const MUSIC_DIR = normalizeDir(envStr("MUSIC_DIR", ""));
+const MP3_DIR = normalizeDir(envStr("MP3_DIR", ""));
 const WIDTH = envNum("VIDEO_WIDTH", 2560);
 const HEIGHT = envNum("VIDEO_HEIGHT", 1440);
 const FPS = envNum("VIDEO_FPS", 30);
@@ -26,7 +26,7 @@ async function summary(lines) {
 async function pickMusic(musicLocal) {
   const ftp = await connectFtp("Đăng nhập FTP");
   try {
-    const musics = await listFiles(ftp, MUSIC_DIR, [".mp3"], "Lấy danh sách nhạc nền");
+    const musics = await listFiles(ftp, MUSIC_DIR, [".mp3"], "Lấy danh sách nhạc nền", "MUSIC_DIR");
     if (!musics.length) throw new StepError("Lấy danh sách nhạc nền", "Thư mục nhạc nền (secret MUSIC_DIR) không có file .mp3 nào.");
     const musicFile = pickRandom(musics);
     log.info(`Có ${musics.length} nhạc nền, chọn: ${musicFile.name} (${formatBytes(musicFile.size)})`);
@@ -42,7 +42,7 @@ async function pickStory(workDir, broken) {
   const ftp = await connectFtp("Đăng nhập FTP");
   try {
     const skip = new Set(broken.map((b) => b.name));
-    const stories = (await listFiles(ftp, STORY_DIR, [".js"], "Lấy danh sách kịch bản")).filter((f) => !skip.has(f.name));
+    const stories = (await listFiles(ftp, STORY_DIR, [".js"], "Lấy danh sách kịch bản", "STORY_DIR")).filter((f) => !skip.has(f.name));
     if (!stories.length) {
       const detail = broken.length
         ? `Đã thử ${broken.length} kịch bản nhưng đều lỗi và đã ${DRY_RUN ? "bỏ qua" : "xoá"}:\n` +
