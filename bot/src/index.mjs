@@ -84,7 +84,8 @@ async function buildVideo(storyFile, musicLocal, baseDir, attempt) {
   log.info(`Số cảnh: ${story.segments.length}`);
   validateStory(story);
 
-  const meta = buildYouTubeMeta(story, path.basename(storyFile.name, ".js"));
+  const metaName = path.basename(storyFile.name, ".js");
+  let meta = buildYouTubeMeta(story, metaName);
   if (!meta.title) throw new StoryError("Đọc kịch bản", "Kịch bản không có YOUTUBE_METADATA.title.");
   log.info(`Tiêu đề YouTube: ${meta.title}`);
   log.info(`Số tag: ${meta.tags.length}`);
@@ -103,6 +104,9 @@ async function buildVideo(storyFile, musicLocal, baseDir, attempt) {
     duration = retimeSegments(story.segments);
     log.info(`Tổng thời lượng sau khi căn theo giọng đọc: ${formatTimestamp(duration)} (${duration.toFixed(1)}s)`);
   }
+
+  // Phải dựng lại mô tả SAU retimeSegments: trước đó mọi seg.start = 0 nên chapters đều là 0:00.
+  meta = buildYouTubeMeta(story, metaName);
 
   log.step("6. Trộn nhạc nền + giọng đọc");
   const audio = await buildAudio(story.segments, musicLocal, duration, workDir, customVoice);
