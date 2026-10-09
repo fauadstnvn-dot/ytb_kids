@@ -5,7 +5,8 @@ import { connectFtp, deleteRemote, download, findMatchingMp3, listFiles, pickRan
 import { buildAudio, renderVideo, validateStory } from "./render.mjs";
 import { buildYouTubeMeta, loadStory, retimeSegments } from "./story.mjs";
 import { synthesizeNarration } from "./tts.mjs";
-import { uploadVideo } from "./youtube.mjs";
+import { DB_ENV, loadCredentialPool } from "./credentials.mjs";
+import { uploadWithCredentialPool } from "./publish.mjs";
 import { probeDuration, StepError, StoryError, envNum, envStr, formatBytes, formatTimestamp, log, requireEnv } from "./utils.mjs";
 
 const STORY_DIR = envStr("STORY_DIR", "/nangmua.vn/echcon/list_kb/");
@@ -119,7 +120,15 @@ async function buildVideo(storyFile, musicLocal, baseDir, attempt) {
 async function main() {
   log.step("1. Kiểm tra cấu hình");
   requireEnv(["FTP_HOST", "FTP_USER", "FTP_PASS"], "Kiểm tra cấu hình");
-  if (!DRY_RUN) requireEnv(["YT_CLIENT_ID", "YT_CLIENT_SECRET", "YT_REFRESH_TOKEN"], "Kiểm tra cấu hình");
+  if (!DRY_RUN) {
+    requireEnv(DB_ENV, "Kiểm tra cấu hình");
+    // Kiểm tra sớm để không mất hàng giờ dựng video rồi mới phát hiện DB không kết nối được.
+    const { credentials, tokenColumn } = await loadCredentialPool();
+    if (!credentials.length) {
+      throw new StepError("Kiểm tra cấu hình", `Bảng secret không có dòng nào active=1 với ${tokenColumn} chứa refresh_token hợp lệ.`);
+    }
+    log.info(`MySQL OK: ${credentials.length} bộ YouTube secret sẵn sàng (cột ${tokenColumn}).`);
+  }
   log.info(`Thư mục kịch bản: ${STORY_DIR}`);
   log.info(`Thư mục nhạc nền: ${MUSIC_DIR}`);
   log.info(`Độ phân giải: ${WIDTH}x${HEIGHT} @${FPS}fps${DRY_RUN ? " (DRY_RUN: không upload, không xoá)" : ""}`);
@@ -167,8 +176,8 @@ async function main() {
   }
 
   log.step("8. Upload lên YouTube");
-  const result = await uploadVideo(video, meta);
-  log.info(`Upload thành công: ${result.url}`);
+  const result = await uploadWithCredentialPool(video, meta);
+  log.info(`Upload thành công bằng secret ${result.credential.label}: ${result.url}`);
 
   log.step("9. Xoá kịch bản đã dùng trên FTP");
   await deleteRemote(storyFile.remotePath, "Xoá kịch bản trên FTP");
@@ -179,6 +188,10 @@ async function main() {
     `- Nhạc nền: \`${musicFile.name}\``,
     `- Thời lượng: ${formatTimestamp(duration)} — ${WIDTH}x${HEIGHT} @${FPS}fps`,
     `- Tag đã dùng (${result.tags.length}): ${result.tags.join(", ") || "(không)"}`,
+    `- Secret đã dùng: ${result.credential.label}`,
+    ...(result.failures.length
+      ? [`- Secret bị bỏ qua (${result.failures.length}):`, ...result.failures.map((f) => `  - ${f.label} — ${f.reason}`)]
+      : []),
     ...brokenLines,
   ]);
   log.step("HOÀN TẤT");
