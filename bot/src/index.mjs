@@ -9,9 +9,10 @@ import { DB_ENV, loadCredentialPool } from "./credentials.mjs";
 import { uploadWithCredentialPool } from "./publish.mjs";
 import { probeDuration, StepError, StoryError, envNum, envStr, formatBytes, formatTimestamp, log, requireEnv } from "./utils.mjs";
 
-const STORY_DIR = envStr("STORY_DIR", "/nangmua.vn/echcon/list_kb/");
-const MUSIC_DIR = envStr("MUSIC_DIR", "/nangmua.vn/echcon/music/");
-const MP3_DIR = envStr("MP3_DIR", "/nangmua.vn/echcon/list_mp3/");
+// Đường dẫn FTP lấy từ GitHub Secret, không ghi cứng trong code và không in ra log để người khác không biết vị trí lưu trữ.
+const STORY_DIR = envStr("STORY_DIR", "");
+const MUSIC_DIR = envStr("MUSIC_DIR", "");
+const MP3_DIR = envStr("MP3_DIR", "");
 const WIDTH = envNum("VIDEO_WIDTH", 2560);
 const HEIGHT = envNum("VIDEO_HEIGHT", 1440);
 const FPS = envNum("VIDEO_FPS", 30);
@@ -26,7 +27,7 @@ async function pickMusic(musicLocal) {
   const ftp = await connectFtp("Đăng nhập FTP");
   try {
     const musics = await listFiles(ftp, MUSIC_DIR, [".mp3"], "Lấy danh sách nhạc nền");
-    if (!musics.length) throw new StepError("Lấy danh sách nhạc nền", `Thư mục ${MUSIC_DIR} không có file .mp3 nào.`);
+    if (!musics.length) throw new StepError("Lấy danh sách nhạc nền", "Thư mục nhạc nền (secret MUSIC_DIR) không có file .mp3 nào.");
     const musicFile = pickRandom(musics);
     log.info(`Có ${musics.length} nhạc nền, chọn: ${musicFile.name} (${formatBytes(musicFile.size)})`);
     await download(ftp, musicFile.remotePath, musicLocal, "Tải nhạc nền");
@@ -46,8 +47,8 @@ async function pickStory(workDir, broken) {
       const detail = broken.length
         ? `Đã thử ${broken.length} kịch bản nhưng đều lỗi và đã ${DRY_RUN ? "bỏ qua" : "xoá"}:\n` +
           broken.map((b) => `  - ${b.name} — ${b.reason}`).join("\n") +
-          `\nKhông còn kịch bản hợp lệ nào trong ${STORY_DIR}. Hãy tải thêm kịch bản .js lên FTP.`
-        : `Không còn kịch bản .js nào trong ${STORY_DIR}. Hãy tải thêm kịch bản lên FTP.`;
+          "\nKhông còn kịch bản hợp lệ nào trong thư mục kịch bản (secret STORY_DIR). Hãy tải thêm kịch bản .js lên FTP."
+        : "Không còn kịch bản .js nào trong thư mục kịch bản (secret STORY_DIR). Hãy tải thêm kịch bản lên FTP.";
       throw new StepError("Chọn kịch bản", detail);
     }
     const storyFile = pickRandom(stories);
@@ -64,7 +65,7 @@ async function pickStory(workDir, broken) {
 async function fetchCustomVoice(storyName, workDir) {
   const ftp = await connectFtp("Đăng nhập FTP");
   try {
-    const hit = await findMatchingMp3(ftp, MP3_DIR, path.basename(storyName, ".js"));
+    const hit = MP3_DIR ? await findMatchingMp3(ftp, MP3_DIR, path.basename(storyName, ".js")) : null;
     if (!hit) return null;
     const local = path.join(workDir, "custom-voice.mp3");
     await download(ftp, hit.remotePath, local, "Tải mp3 giọng đọc riêng");
@@ -129,8 +130,8 @@ async function main() {
     }
     log.info(`MySQL OK: ${credentials.length} bộ YouTube secret sẵn sàng (cột ${tokenColumn}).`);
   }
-  log.info(`Thư mục kịch bản: ${STORY_DIR}`);
-  log.info(`Thư mục nhạc nền: ${MUSIC_DIR}`);
+  requireEnv(["STORY_DIR", "MUSIC_DIR"], "Kiểm tra cấu hình");
+  log.info(`Thư mục FTP: lấy từ secret STORY_DIR, MUSIC_DIR${MP3_DIR ? ", MP3_DIR" : " (không đặt MP3_DIR → luôn dùng Google TTS)"}.`);
   log.info(`Độ phân giải: ${WIDTH}x${HEIGHT} @${FPS}fps${DRY_RUN ? " (DRY_RUN: không upload, không xoá)" : ""}`);
 
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "story-video-"));
