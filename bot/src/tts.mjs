@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { StepError, envStr, log, probeDuration, run, sleep } from "./utils.mjs";
+import { StepError, envNum, envStr, log, probeDuration, run, sleep } from "./utils.mjs";
 
 const STEP = "Tạo giọng đọc TTS";
 const CHUNK = 180;
@@ -54,6 +54,33 @@ async function fetchChunk(text, lang) {
   throw new StepError(STEP, `Google TTS không trả về MP3 cho đoạn "${text.slice(0, 60)}…" sau 4 lần thử (${lastErr}).`);
 }
 
+/** Số nửa cung nâng cao độ để ra giọng trẻ em (mặc định +5, chỉnh bằng biến môi trường TTS_PITCH_SEMITONES). */
+const PITCH_SEMITONES = envNum("TTS_PITCH_SEMITONES", 5);
+const SAMPLE_RATE = 48000;
+
+/**
+ * Chuyển MP3 -> WAV mono 48kHz và nâng giọng +N nửa cung nhưng GIỮ NGUYÊN tốc độ đọc
+ * (tương đương Tone.PitchShift + highshelf 3kHz +4dB trong xyz.php).
+ * Ưu tiên bộ lọc rubberband (chất lượng tốt); nếu bản ffmpeg không có thì dùng asetrate + atempo.
+ */
+async function toChildVoice(mp3, wav) {
+  const base = ["-y", "-hide_banner", "-loglevel", "error", "-i", mp3];
+  const tail = ["-ar", String(SAMPLE_RATE), "-ac", "1", wav];
+  const shelf = "highshelf=f=3000:g=4";
+  if (!PITCH_SEMITONES) {
+    await run("ffmpeg", [...base, "-af", shelf, ...tail], { step: STEP });
+    return;
+  }
+  const ratio = Math.pow(2, PITCH_SEMITONES / 12);
+  try {
+    await run("ffmpeg", [...base, "-af", `rubberband=pitch=${ratio.toFixed(6)},${shelf}`, ...tail], { step: STEP });
+  } catch {
+    log.info("ffmpeg không có rubberband, dùng asetrate + atempo để nâng giọng.");
+    const af = `aresample=${SAMPLE_RATE},asetrate=${Math.round(SAMPLE_RATE * ratio)},aresample=${SAMPLE_RATE},atempo=${(1 / ratio).toFixed(6)},${shelf}`;
+    await run("ffmpeg", [...base, "-af", af, ...tail], { step: STEP });
+  }
+}
+
 /** Tạo file WAV giọng đọc cho mỗi cảnh (đọc phần "action"), gắn {file, duration} vào seg.narration. */
 export async function synthesizeNarration(segments, workDir) {
   const lang = detectLang(segments.map((s) => s.narrationText));
@@ -74,7 +101,7 @@ export async function synthesizeNarration(segments, workDir) {
     const mp3 = path.join(dir, `seg_${seg.index}.mp3`);
     const wav = path.join(dir, `seg_${seg.index}.wav`);
     await fs.writeFile(mp3, Buffer.concat(parts));
-    await run("ffmpeg", ["-y", "-hide_banner", "-loglevel", "error", "-i", mp3, "-ar", "48000", "-ac", "1", wav], { step: STEP });
+    await toChildVoice(mp3, wav);
     const duration = await probeDuration(wav, STEP);
     seg.narration = { file: wav, duration };
     log.info(`  Cảnh ${seg.index + 1} "${seg.title}": ${duration.toFixed(2)}s giọng đọc`);
