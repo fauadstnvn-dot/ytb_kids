@@ -49,6 +49,11 @@ export function normalizeDir(raw) {
  * Vào hẳn thư mục bằng CWD rồi mới LIST. Nhiều FTP server trả về danh sách RỖNG (không báo lỗi)
  * khi LIST một đường dẫn không tồn tại; CWD thì báo lỗi rõ ràng.
  */
+function redact(message, dir) {
+  const bare = dir.replace(/\/+$/, "");
+  return String(message).split(bare).join(`<${"thư mục"}>`);
+}
+
 export async function listFiles(client, dir, exts, step, secretName) {
   const home = await client.pwd().catch(() => "/");
   try {
@@ -57,7 +62,7 @@ export async function listFiles(client, dir, exts, step, secretName) {
     } catch (e) {
       throw new StepError(
         step,
-        `Thư mục trong secret ${secretName} không tồn tại trên FTP (${e.message}). Kiểm tra lại giá trị secret: không có dấu nháy, đúng chữ hoa/thường, dạng /ten-mien/thu-muc/.`,
+        `Thư mục trong secret ${secretName} không tồn tại trên FTP (${redact(e.message, dir)}). Kiểm tra lại giá trị secret: không có dấu nháy, đúng chữ hoa/thường, dạng /ten-mien/thu-muc/.`,
         e
       );
     }
@@ -72,7 +77,7 @@ export async function listFiles(client, dir, exts, step, secretName) {
     return matched;
   } catch (e) {
     if (e instanceof StepError) throw e;
-    throw new StepError(step, `Không đọc được thư mục của secret ${secretName}: ${e.message}`, e);
+    throw new StepError(step, `Không đọc được thư mục của secret ${secretName}: ${redact(e.message, dir)}`, e);
   } finally {
     await client.cd(home).catch(() => {});
   }
