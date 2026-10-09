@@ -89,7 +89,7 @@ export function loadStory(code, filename) {
 const NARR_PAD = 0.7;
 
 /** Kéo dài mỗi cảnh để >= thời lượng giọng đọc + đệm (giống retimeTimeline của index.php). */
-export function retimeSegments(segments) {
+export function retimeSegments(segments, minTotal = 0) {
   let cursor = 0;
   for (const seg of segments) {
     const narr = seg.narration?.duration || 0;
@@ -100,6 +100,13 @@ export function retimeSegments(segments) {
     seg.raw.start = seg.start;
     seg.raw.end = seg.end;
     cursor += dur;
+  }
+  // Có mp3 riêng dài hơn tổng các cảnh: kéo dài cảnh cuối để video không cắt ngang mp3.
+  const last = segments[segments.length - 1];
+  if (last && cursor < minTotal) {
+    cursor = minTotal;
+    last.end = cursor;
+    last.raw.end = cursor;
   }
   return cursor;
 }
