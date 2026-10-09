@@ -85,8 +85,9 @@ jobs:
           YT_SECRET_TABLE: tb_bao_secret
           YT_TOKEN_COLUMN: token_kid
           YT_MAX_NUM: "9"
-          STORY_DIR: /nangmua.vn/echcon/list_kb/
-          MUSIC_DIR: /nangmua.vn/echcon/music/
+          STORY_DIR: ${{ secrets.STORY_DIR }}
+          MUSIC_DIR: ${{ secrets.MUSIC_DIR }}
+          MP3_DIR: ${{ secrets.MP3_DIR }}
           VIDEO_WIDTH: "2560"
           VIDEO_HEIGHT: "1440"
           VIDEO_FPS: "30"
