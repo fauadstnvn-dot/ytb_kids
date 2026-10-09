@@ -31,13 +31,14 @@ function loadFonts() {
  * Nhạc nền lặp lại/cắt đúng độ dài video ở mức 12% (như MUSIC_DUCK của index.php),
  * mỗi cảnh chèn giọng đọc đúng mốc bắt đầu của cảnh. Fade-out 2s cuối video.
  */
-export async function buildAudio(segments, musicFile, duration, workDir) {
+export async function buildAudio(segments, musicFile, duration, workDir, fullVoiceFile = null) {
   const out = path.join(workDir, "audio.wav");
   const dur = duration.toFixed(3);
   const fadeStart = Math.max(0, duration - 2).toFixed(3);
   const args = ["-y", "-hide_banner", "-loglevel", "error", "-stream_loop", "-1", "-i", musicFile];
   const voiced = segments.filter((s) => s.narration);
   voiced.forEach((s) => args.push("-i", s.narration.file));
+  if (fullVoiceFile) args.push("-i", fullVoiceFile);
 
   const fmt = "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo";
   // asetpts: -stream_loop làm lệch timestamp mỗi vòng lặp (hụt ~1s/5 phút với mp3 ngắn) -> đánh lại theo số mẫu.
@@ -48,6 +49,11 @@ export async function buildAudio(segments, musicFile, duration, workDir) {
     filters.push(`[${i + 1}:a]${fmt},volume=${VOICE_VOLUME},adelay=${ms}:all=1[v${i}]`);
     labels.push(`[v${i}]`);
   });
+  if (fullVoiceFile) {
+    // mp3 riêng chạy từ giây 0 đến hết, cùng âm lượng với giọng TTS.
+    filters.push(`[${voiced.length + 1}:a]${fmt},volume=${VOICE_VOLUME}[full]`);
+    labels.push("[full]");
+  }
   filters.push(
     `${labels.join("")}amix=inputs=${labels.length}:duration=longest:normalize=0:dropout_transition=0,apad=whole_dur=${dur}[out]`
   );
@@ -59,7 +65,7 @@ export async function buildAudio(segments, musicFile, duration, workDir) {
   if (got < duration - 1) {
     throw new StepError(AUDIO_STEP, `File âm thanh chỉ dài ${got.toFixed(1)}s, cần ${duration.toFixed(1)}s. File nhạc nền có thể bị hỏng.`);
   }
-  log.info(`Âm thanh: ${got.toFixed(1)}s (${voiced.length} đoạn giọng đọc, nhạc nền ${Math.round(MUSIC_VOLUME * 100)}%)`);
+  log.info(`Âm thanh: ${got.toFixed(1)}s (${fullVoiceFile ? "mp3 riêng chạy suốt video" : `${voiced.length} đoạn giọng đọc`}, nhạc nền ${Math.round(MUSIC_VOLUME * 100)}%)`);
   return out;
 }
 
