@@ -34,14 +34,47 @@ export async function connectFtp(step) {
   }
 }
 
-export async function listFiles(client, dir, exts, step) {
+/**
+ * Chuẩn hoá đường dẫn thư mục lấy từ secret: bỏ dấu nháy/khoảng trắng dán thừa, đổi \\ thành /,
+ * thêm / ở đầu. Lỗi dán secret là nguyên nhân phổ biến nhất khiến thư mục "trống".
+ */
+export function normalizeDir(raw) {
+  let dir = String(raw ?? "").trim().replace(/^["'`]+|["'`]+$/g, "").trim().replace(/\\/g, "/");
+  if (!dir) return "";
+  if (!dir.startsWith("/")) dir = `/${dir}`;
+  return dir.replace(/\/{2,}/g, "/");
+}
+
+/**
+ * Vào hẳn thư mục bằng CWD rồi mới LIST. Nhiều FTP server trả về danh sách RỖNG (không báo lỗi)
+ * khi LIST một đường dẫn không tồn tại; CWD thì báo lỗi rõ ràng.
+ */
+export async function listFiles(client, dir, exts, step, secretName) {
+  const home = await client.pwd().catch(() => "/");
   try {
-    const items = await client.list(dir);
-    return items
+    try {
+      await client.cd(dir);
+    } catch (e) {
+      throw new StepError(
+        step,
+        `Thư mục trong secret ${secretName} không tồn tại trên FTP (${e.message}). Kiểm tra lại giá trị secret: không có dấu nháy, đúng chữ hoa/thường, dạng /ten-mien/thu-muc/.`,
+        e
+      );
+    }
+    const items = await client.list();
+    const matched = items
       .filter((f) => f.isFile && exts.some((x) => f.name.toLowerCase().endsWith(x)))
       .map((f) => ({ name: f.name, size: f.size, remotePath: path.posix.join(dir, f.name) }));
+    if (!matched.length) {
+      const sample = items.slice(0, 5).map((f) => `${f.name}${f.isDirectory ? "/" : ""}`).join(", ");
+      log.warn(`Thư mục của secret ${secretName} có ${items.length} mục nhưng không có file ${exts.join("/")}${sample ? `. Ví dụ: ${sample}` : ""}.`);
+    }
+    return matched;
   } catch (e) {
-    throw new StepError(step, `Không đọc được thư mục FTP: ${e.message}. Kiểm tra đường dẫn trong secret có tồn tại không.`, e);
+    if (e instanceof StepError) throw e;
+    throw new StepError(step, `Không đọc được thư mục của secret ${secretName}: ${e.message}`, e);
+  } finally {
+    await client.cd(home).catch(() => {});
   }
 }
 
