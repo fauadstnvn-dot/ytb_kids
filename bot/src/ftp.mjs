@@ -41,7 +41,7 @@ export async function listFiles(client, dir, exts, step) {
       .filter((f) => f.isFile && exts.some((x) => f.name.toLowerCase().endsWith(x)))
       .map((f) => ({ name: f.name, size: f.size, remotePath: path.posix.join(dir, f.name) }));
   } catch (e) {
-    throw new StepError(step, `Không đọc được thư mục FTP "${dir}": ${e.message}. Kiểm tra đường dẫn có tồn tại không.`, e);
+    throw new StepError(step, `Không đọc được thư mục FTP: ${e.message}. Kiểm tra đường dẫn trong secret có tồn tại không.`, e);
   }
 }
 
@@ -53,7 +53,7 @@ export async function download(client, remotePath, localPath, step) {
   try {
     await client.downloadTo(localPath, remotePath);
   } catch (e) {
-    throw new StepError(step, `Tải file "${remotePath}" từ FTP thất bại: ${e.message}`, e);
+    throw new StepError(step, `Tải file "${path.posix.basename(remotePath)}" từ FTP thất bại: ${e.message}`, e);
   }
 }
 
@@ -62,9 +62,9 @@ export async function deleteRemote(remotePath, step) {
   const client = await connectFtp(step);
   try {
     await client.remove(remotePath);
-    log.info(`Đã xoá kịch bản trên FTP: ${remotePath}`);
+    log.info(`Đã xoá kịch bản trên FTP: ${path.posix.basename(remotePath)}`);
   } catch (e) {
-    throw new StepError(step, `Xoá file "${remotePath}" trên FTP thất bại: ${e.message}. Hãy xoá thủ công để tránh upload trùng.`, e);
+    throw new StepError(step, `Xoá file "${path.posix.basename(remotePath)}" trên FTP thất bại: ${e.message}. Hãy xoá thủ công để tránh upload trùng.`, e);
   } finally {
     client.close();
   }
@@ -76,7 +76,7 @@ export async function findMatchingMp3(client, dir, storyBaseName) {
   try {
     items = await client.list(dir);
   } catch (e) {
-    log.warn(`Không đọc được thư mục mp3 riêng "${dir}": ${e.message}. Dùng Google TTS.`);
+    log.warn(`Không đọc được thư mục mp3 riêng (secret MP3_DIR): ${e.message}. Dùng Google TTS.`);
     return null;
   }
   const want = storyBaseName.trim().toLowerCase();
