@@ -75,9 +75,16 @@ jobs:
           FTP_PASS: ${{ secrets.FTP_PASS }}
           FTP_PORT: ${{ secrets.FTP_PORT }}
           FTP_SECURE: ${{ secrets.FTP_SECURE }}
-          YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
-          YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
-          YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+          # YouTube client_id / client_secret / refresh_token được đọc từ bảng tb_bao_secret trên MySQL.
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASS: ${{ secrets.DB_PASS }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_SSL: ${{ secrets.DB_SSL }}
+          YT_SECRET_TABLE: tb_bao_secret
+          YT_TOKEN_COLUMN: token_kid
+          YT_MAX_NUM: "9"
           STORY_DIR: /nangmua.vn/echcon/list_kb/
           MUSIC_DIR: /nangmua.vn/echcon/music/
           VIDEO_WIDTH: "2560"
