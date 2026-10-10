@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { connectFtp, deleteRemote, download, findMatchingMp3, listFiles, normalizeDir, pickRandom } from "./ftp.mjs";
 import { buildAudio, renderVideo, validateStory } from "./render.mjs";
-import { buildYouTubeMeta, loadStory, retimeSegments } from "./story.mjs";
+import { buildYouTubeMeta, loadStory, pickThumbnailTime, retimeSegments } from "./story.mjs";
 import { synthesizeNarration } from "./tts.mjs";
 import { DB_ENV, loadCredentialPool } from "./credentials.mjs";
 import { uploadWithCredentialPool } from "./publish.mjs";
@@ -114,8 +114,10 @@ async function buildVideo(storyFile, musicLocal, baseDir, attempt) {
   const audio = await buildAudio(story.segments, musicLocal, duration, workDir, customVoice);
 
   log.step("7. Dựng video 2K bằng canvas + ffmpeg");
-  const video = await renderVideo(story, audio, duration, workDir, { width: WIDTH, height: HEIGHT, fps: FPS });
-  return { meta, video, duration };
+  const thumb = pickThumbnailTime(story);
+  log.info(`Ảnh đại diện lấy ở ${thumb.time.toFixed(1)}s trong cảnh "${thumb.seg.key}" (nằm trong cảnh quay, ngoài hiệu ứng chuyển cảnh).`);
+  const { video, thumbnail } = await renderVideo(story, audio, duration, workDir, { width: WIDTH, height: HEIGHT, fps: FPS, thumbnailTime: thumb.time });
+  return { meta, video, thumbnail, duration };
 }
 
 async function main() {
@@ -163,7 +165,7 @@ async function main() {
       log.info("Chọn kịch bản khác...");
     }
   }
-  const { meta, video, duration } = built;
+  const { meta, video, thumbnail, duration } = built;
   const brokenLines = broken.length
     ? [`- Kịch bản lỗi đã ${DRY_RUN ? "bỏ qua" : "xoá"} (${broken.length}):`, ...broken.map((b) => `  - \`${b.name}\` — ${b.reason}`)]
     : [];
@@ -171,13 +173,14 @@ async function main() {
   if (DRY_RUN) {
     const keep = path.resolve("output.mp4");
     await fs.copyFile(video, keep);
+    if (thumbnail) await fs.copyFile(thumbnail, path.resolve("thumbnail.jpg"));
     log.info(`DRY_RUN: đã lưu ${keep}, bỏ qua upload và xoá kịch bản.`);
     await summary([`### DRY_RUN: ${meta.title}`, `- Kịch bản: \`${storyFile.name}\``, `- Nhạc nền: \`${musicFile.name}\``, ...brokenLines]);
     return;
   }
 
   log.step("8. Upload lên YouTube");
-  const result = await uploadWithCredentialPool(video, meta);
+  const result = await uploadWithCredentialPool(video, meta, thumbnail);
   log.info(`Upload thành công bằng secret ${result.credential.label}: ${result.url}`);
 
   log.step("9. Xoá kịch bản đã dùng trên FTP");
@@ -190,6 +193,7 @@ async function main() {
     `- Thời lượng: ${formatTimestamp(duration)} — ${WIDTH}x${HEIGHT} @${FPS}fps`,
     `- Tag đã dùng (${result.tags.length}): ${result.tags.join(", ") || "(không)"}`,
     `- Secret đã dùng: ${result.credential.label}`,
+    `- Ảnh đại diện: ${result.thumbnailSet ? "đã đặt" : "KHÔNG đặt được (xem log)"}`,
     ...(result.failures.length
       ? [`- Secret bị bỏ qua (${result.failures.length}):`, ...result.failures.map((f) => `  - ${f.label} — ${f.reason}`)]
       : []),
