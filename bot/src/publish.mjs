@@ -12,7 +12,7 @@ const STEP = "Upload YouTube";
  *  - Lỗi khác (mạng, file video, metadata...) -> dừng ngay vì đổi secret cũng không giải quyết được.
  * Danh sách được đọc NGAY TRƯỚC khi upload (không phải lúc bắt đầu) để dùng dữ liệu mới nhất sau hàng giờ dựng video.
  */
-export async function uploadWithCredentialPool(file, meta) {
+export async function uploadWithCredentialPool(file, meta, thumbnail = null) {
   const { credentials, total, tokenColumn } = await loadCredentialPool();
   if (!credentials.length) {
     throw new StepError(STEP, `Không có dòng secret hợp lệ nào (active=1, có ${tokenColumn}.refresh_token). Tìm thấy ${total} dòng active.`);
@@ -25,7 +25,7 @@ export async function uploadWithCredentialPool(file, meta) {
     try {
       const tokenResponse = await getAccessToken(cred);
       await saveRefreshedToken(cred, tokenResponse);
-      const result = await uploadVideo(file, meta, tokenResponse.access_token);
+      const result = await uploadVideo(file, meta, tokenResponse.access_token, thumbnail);
       await markUploadSuccess(cred);
       return { ...result, credential: cred, failures };
     } catch (e) {
