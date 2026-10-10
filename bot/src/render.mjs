@@ -144,9 +144,12 @@ function segAt(segments, time) {
  * Vẽ từng khung bằng Canvas 2D (Skia) rồi đẩy pixel RGBA thô vào ffmpeg qua stdin,
  * ghép âm thanh và mã hoá H.264 2K (2560x1440) + AAC.
  */
-export async function renderVideo(story, audioFile, duration, workDir, { width, height, fps }) {
+export async function renderVideo(story, audioFile, duration, workDir, { width, height, fps, thumbnailTime = null }) {
   loadFonts();
   const out = path.join(workDir, "video.mp4");
+  const thumbFile = path.join(workDir, "thumbnail.jpg");
+  const thumbFrame = thumbnailTime == null ? -1 : Math.min(Math.floor(thumbnailTime * fps), Math.ceil(duration * fps) - 1);
+  let thumbnail = null;
   const showCaption = envStr("SHOW_CAPTION", "true") !== "false";
   const preset = envStr("X264_PRESET", "veryfast");
   const crf = envStr("X264_CRF", "18");
@@ -230,6 +233,22 @@ export async function renderVideo(story, audioFile, duration, workDir, { width, 
     } finally {
       rawCtx.restore();
     }
+    // Chụp trước khi vẽ phụ đề để ảnh đại diện sạch; thu về 1280x720 (YouTube giới hạn 2MB).
+    if (i === thumbFrame) {
+      try {
+        const tw = Math.min(1280, width);
+        const th = Math.round((tw * height) / width);
+        const small = createCanvas(tw, th);
+        small.getContext("2d").drawImage(canvas, 0, 0, tw, th);
+        let buf = small.toBuffer("image/jpeg", 90);
+        if (buf.length > 1_900_000) buf = small.toBuffer("image/jpeg", 75);
+        fs.writeFileSync(thumbFile, buf);
+        thumbnail = thumbFile;
+        log.info(`Ảnh đại diện: khung ${i} (${time.toFixed(1)}s, cảnh "${seg.key}"), ${tw}x${th}, ${formatBytes(buf.length)}`);
+      } catch (e) {
+        log.warn(`Không chụp được ảnh đại diện: ${e.message}`);
+      }
+    }
     if (showCaption) {
       rawCtx.setTransform(1, 0, 0, 1, 0, 0);
       drawCaption(rawCtx, width, height, seg, localT);
@@ -258,5 +277,5 @@ export async function renderVideo(story, audioFile, duration, workDir, { width, 
     throw new StepError(VIDEO_STEP, `Video tạo ra không hợp lệ (${formatBytes(size)}, ${got.toFixed(1)}s).\n${ffErr}`);
   }
   log.info(`Video: ${out} — ${width}x${height} @${fps}fps, ${got.toFixed(1)}s, ${formatBytes(size)}`);
-  return out;
+  return { video: out, thumbnail };
 }
