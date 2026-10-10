@@ -175,7 +175,7 @@ const NARR_PAD = 0.7;
 const FLIP_LEAD_STORY = 1.75;
 const FLIP_LEAD_EDGE = 1.3;
 const FLIP_EXTRA = 3.5;
-// Khoảng lặng từ lúc đọc xong đến lúc bắt đầu lật sang cảnh sau (đã gồm cả đoạn thu nhỏ 0.8s cuối cảnh):
+// Khoảng lặng từ lúc đọc xong đến lúc bắt đầu lật sang cảnh sau (đã gồm cả đo��n thu nhỏ 0.8s cuối cảnh):
 // luôn nằm trong [TAIL_GAP, TAIL_GAP + MAX_TAIL_SLACK] = 1.5-2.0s.
 const TAIL_GAP = 1.5;
 const MAX_TAIL_SLACK = 0.5;
@@ -216,6 +216,30 @@ export function retimeSegments(segments, minTotal = 0) {
     last.raw.end = cursor;
   }
   return cursor;
+}
+
+// Cách mép đầu/cuối cảnh tối thiểu (giây) để khung ảnh bìa luôn nằm trong cảnh quay thật:
+// đầu cảnh là lật trang/rèm/clapper + phóng vào tranh, cuối cảnh là thu nhỏ + hiệu ứng chuyển cảnh.
+const THUMB_HEAD_GUARD = 1.2;
+const THUMB_TAIL_GUARD = 3.0;
+
+/**
+ * Chọn thời điểm (giây, theo timeline video) của khung hình dùng làm ảnh đại diện.
+ * Chỉ lấy trong cảnh nội dung (bỏ bìa và trang kết nếu có hiệu ứng), ở giữa phần "tranh đứng yên",
+ * tránh đoạn mở đầu (seg.lead) và đoạn cuối chứa hiệu ứng. Gọi SAU retimeSegments.
+ */
+export function pickThumbnailTime(story) {
+  const segs = story.segments;
+  const fx = !!story.bookFlip;
+  const pool = fx && segs.length > 2 ? segs.slice(1, -1) : segs;
+  const seg = pool[Math.min(Math.floor(pool.length / 3), pool.length - 1)];
+  const dur = seg.end - seg.start;
+  const head = fx ? Math.max(seg.lead || 0, seg.leadMax || 0) + THUMB_HEAD_GUARD : 0.5;
+  const tail = fx ? THUMB_TAIL_GUARD : 0.5;
+  const lo = head;
+  const hi = Math.max(lo, dur - tail);
+  const local = Math.min(hi, Math.max(lo, dur * 0.5));
+  return { time: seg.start + Math.min(local, Math.max(0, dur - 0.1)), seg };
 }
 
 function cleanText(s) {
