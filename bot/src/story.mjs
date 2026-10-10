@@ -1,7 +1,45 @@
 import vm from "node:vm";
-import { StoryError as StepError, formatTimestamp } from "./utils.mjs";
+import { createCanvas } from "@napi-rs/canvas";
+import { browserLikeContext } from "./ctx-compat.mjs";
+import { StoryError as StepError, formatTimestamp, log } from "./utils.mjs";
 
 const STEP = "Đọc kịch bản";
+
+/**
+ * Trình duyệt có `document.createElement("canvas")`; sandbox Node thì không. Hiệu ứng lật trang sách
+ * (BookFlipKB) và cache layer của kịch bản đều cần canvas phụ, nếu thiếu nó sẽ ném lỗi ở MỌI khung
+ * và tự tắt -> video chỉ còn cảnh gốc, không có lật trang. Shim này cấp canvas phụ giống trình duyệt.
+ */
+function makeDocumentShim() {
+  const wrapped = new WeakMap();
+  const patch = (canvas) => {
+    const rawGetContext = canvas.getContext.bind(canvas);
+    Object.defineProperty(canvas, "getContext", {
+      configurable: true,
+      value: (type, ...rest) => {
+        const raw = rawGetContext(type, ...rest);
+        if (!raw || type !== "2d") return raw;
+        let proxy = wrapped.get(raw);
+        if (!proxy) {
+          proxy = browserLikeContext(raw);
+          wrapped.set(raw, proxy);
+        }
+        return proxy;
+      },
+    });
+    return canvas;
+  };
+  return {
+    createElement(tag) {
+      if (String(tag).toLowerCase() !== "canvas") {
+        return { style: {}, setAttribute() {}, appendChild() {}, addEventListener() {} };
+      }
+      return patch(createCanvas(300, 150));
+    },
+    addEventListener() {},
+    body: { appendChild() {} },
+  };
+}
 
 /**
  * Chạy file kịch bản trong sandbox giống trình duyệt (window = global) và lấy ra:
@@ -18,6 +56,7 @@ export function loadStory(code, filename) {
     performance: { now: () => 0 },
     requestAnimationFrame: () => 0,
     cancelAnimationFrame: () => {},
+    document: makeDocumentShim(),
   };
   sandbox.window = sandbox;
   sandbox.self = sandbox;
@@ -33,27 +72,60 @@ export function loadStory(code, filename) {
   const kb = sandbox.KICHBAN_SCRIPT;
   let api = null;
 
-  if (sb && Array.isArray(sb.SEGMENTS) && typeof sb.drawScene === "function") {
+  const kbSegs = kb && (Array.isArray(kb.SEGMENTS) ? kb.SEGMENTS : kb.segments);
+  const hasFlip = !!(kb && kb.__bookFlip && typeof kb.drawScene === "function" && Array.isArray(kbSegs) && kbSegs.length);
+
+  if (hasFlip) {
+    // File đã chèn hiệu ứng lật sách: window.KICHBAN_SCRIPT là bản ĐÃ bọc (có bìa, lật trang, trang kết,
+    // thời lượng mỗi cảnh đã cộng thêm). Phải dùng nó thay vì Storyboard gốc, nếu không sẽ mất hiệu ứng.
+    let target = null;
+    let tw = 1920;
+    let th = 1080;
+    api = {
+      segments: kbSegs,
+      init: (c, w, h) => {
+        target = c;
+        tw = w;
+        th = h;
+        if (sb && typeof sb.init === "function") sb.init(c, w, h);
+        if (typeof kb.init === "function") kb.init(c, w, h);
+      },
+      drawScene: (seg, t) => kb.drawScene(target, tw, th, seg, t),
+      meta: (sb && sb.YOUTUBE_METADATA) || kb.YOUTUBE_METADATA || {
+        title: kb.youtube_title || kb.title,
+        description: kb.youtube_description || kb.description,
+        tags: kb.tags,
+      },
+      bookFlip: true,
+    };
+    log.info(`Phát hiện hiệu ứng lật trang sách (BookFlipKB): dùng KICHBAN_SCRIPT, ${kbSegs.length} cảnh (gồm bìa + trang kết).`);
+  } else if (sb && Array.isArray(sb.SEGMENTS) && typeof sb.drawScene === "function") {
     api = {
       segments: sb.SEGMENTS,
       init: typeof sb.init === "function" ? sb.init.bind(sb) : () => {},
       drawScene: sb.drawScene.bind(sb),
       meta: sb.YOUTUBE_METADATA || {},
     };
-  } else if (kb && typeof kb.drawScene === "function") {
-    const segs = Array.isArray(kb.SEGMENTS) ? kb.SEGMENTS : kb.segments;
-    if (Array.isArray(segs)) {
-      api = {
-        segments: segs,
-        init: typeof kb.init === "function" ? kb.init.bind(kb) : () => {},
-        drawScene: kb.drawScene.bind(kb),
-        meta: kb.YOUTUBE_METADATA || {
-          title: kb.youtube_title || kb.title,
-          description: kb.youtube_description || kb.description,
-          tags: kb.tags,
-        },
-      };
-    }
+  } else if (kb && typeof kb.drawScene === "function" && Array.isArray(kbSegs)) {
+    let target = null;
+    let tw = 1920;
+    let th = 1080;
+    api = {
+      segments: kbSegs,
+      init: (c, w, h) => {
+        target = c;
+        tw = w;
+        th = h;
+        if (typeof kb.init === "function") kb.init(c, w, h);
+      },
+      // KICHBAN_SCRIPT.drawScene có chữ ký (ctx, W, H, seg, t), khác Storyboard.drawScene(seg, t).
+      drawScene: (seg, t) => kb.drawScene(target, tw, th, seg, t),
+      meta: kb.YOUTUBE_METADATA || {
+        title: kb.youtube_title || kb.title,
+        description: kb.youtube_description || kb.description,
+        tags: kb.tags,
+      },
+    };
   }
 
   if (!api) {
@@ -80,6 +152,10 @@ export function loadStory(code, filename) {
       start: 0,
       end: 0,
       narration: null,
+      // Đoạn mở đầu (lật trang + phóng vào tranh) mà giọng đọc phải chờ; 0 nếu không có hiệu ứng sách.
+      leadMax: api.bookFlip ? (i === 0 || i === api.segments.length - 1 ? FLIP_LEAD_EDGE : FLIP_LEAD_STORY) : 0,
+      scalesWithDuration: !!api.bookFlip && i !== 0 && i !== api.segments.length - 1,
+      lead: 0,
     };
   });
 
@@ -87,13 +163,37 @@ export function loadStory(code, filename) {
 }
 
 const NARR_PAD = 0.7;
+// Khớp book-flip-kb.js: T_FLIP + T_HOLD + T_ZOOM_IN = 1.3 + 0.45 + 0.95; bìa/trang kết chỉ chờ T_FLIP.
+// Giọng đọc bắt đầu khi trang lật xong + giữ (T_FLIP+T_HOLD), đúng lúc tranh bắt đầu phóng vào.
+const FLIP_LEAD_STORY = 1.75;
+const FLIP_LEAD_EDGE = 1.3;
+const FLIP_EXTRA = 3.5;
+// Khoảng lặng từ lúc đọc xong đến lúc bắt đầu lật sang cảnh sau (đã gồm cả đoạn thu nhỏ 0.8s cuối cảnh):
+// luôn nằm trong [TAIL_GAP, TAIL_GAP + MAX_TAIL_SLACK] = 1.5-2.0s.
+const TAIL_GAP = 1.5;
+const MAX_TAIL_SLACK = 0.5;
 
 /** Kéo dài mỗi cảnh để >= thời lượng giọng đọc + đệm (giống retimeTimeline của index.php). */
 export function retimeSegments(segments, minTotal = 0) {
   let cursor = 0;
   for (const seg of segments) {
     const narr = seg.narration?.duration || 0;
-    const dur = Math.max(seg.origDuration, narr > 0 ? narr + NARR_PAD : seg.origDuration);
+    let lead = narr > 0 ? seg.leadMax : 0;
+    const tail = seg.leadMax ? TAIL_GAP : NARR_PAD;
+    const fit = (l) => {
+      if (!(narr > 0)) return seg.origDuration;
+      const need = l + narr + tail;
+      return seg.leadMax ? Math.min(Math.max(seg.origDuration, need), need + MAX_TAIL_SLACK) : Math.max(seg.origDuration, need);
+    };
+    let dur = fit(lead);
+    if (lead && seg.scalesWithDuration) {
+      // Hiệu ứng co đoạn mở đầu theo sc = min(1, D*0.55/EXTRA) khi cảnh ngắn; giải lặp cho khớp.
+      for (let k = 0; k < 4; k++) {
+        lead = seg.leadMax * Math.min(1, (dur * 0.55) / FLIP_EXTRA);
+        dur = fit(lead);
+      }
+    }
+    seg.lead = lead;
     seg.start = cursor;
     seg.end = cursor + dur;
     // Script vẽ dựa trên start/end của chính object cảnh.
