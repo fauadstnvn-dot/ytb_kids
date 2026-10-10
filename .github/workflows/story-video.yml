@@ -99,5 +99,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: video-dry-run
-          path: bot/output.mp4
+          path: |
+            bot/output.mp4
+            bot/thumbnail.jpg
           retention-days: 3
