@@ -30,7 +30,7 @@ function wrapWords(ctx, text, font, maxW) {
 function karaokeProgress(seg, t) {
   const nd = seg.narration?.duration || 0;
   const dur = nd > 0 ? nd : seg.end - seg.start;
-  return dur > 0 ? clamp(t / dur, 0, 1) : 0;
+  return dur > 0 ? clamp((t - (seg.lead || 0)) / dur, 0, 1) : 0;
 }
 
 export function drawCaption(ctx, W, H, seg, t) {
