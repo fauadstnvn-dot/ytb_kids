@@ -225,6 +225,41 @@ async function sendFile(token, uploadUrl, file, size) {
   }
 }
 
+/**
+ * Đặt ảnh đại diện (thumbnails.set). Cần kênh đã xác minh số điện thoại; video đã tạo xong nên
+ * lỗi ở đây KHÔNG làm hỏng lượt upload, chỉ cảnh báo. Thử lại vài lần vì video mới có thể chưa sẵn sàng.
+ */
+export async function setThumbnail(token, videoId, file) {
+  if (!file || !fs.existsSync(file)) {
+    log.warn("Không có file ảnh đại diện, bỏ qua bước đặt thumbnail.");
+    return false;
+  }
+  const data = fs.readFileSync(file);
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      const res = await fetch(`https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}&uploadType=media`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "image/jpeg", "Content-Length": String(data.length) },
+        body: data,
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (res.ok) {
+        log.info(`Đã đặt ảnh đại diện cho video (${formatBytes(data.length)}).`);
+        return true;
+      }
+      const { json, text } = await readJson(res);
+      const info = describeApiError(res.status, json, text);
+      const permanent = res.status === 403 || res.status === 401 || res.status === 400;
+      log.warn(`Đặt ảnh đại diện lần ${attempt} thất bại — ${info.summary}${res.status === 403 ? " (kênh cần được xác minh để dùng ảnh đại diện tuỳ chỉnh)" : ""}`);
+      if (permanent && res.status !== 400) return false;
+    } catch (e) {
+      log.warn(`Đặt ảnh đại diện lần ${attempt} lỗi mạng: ${e.message}`);
+    }
+    await sleep(5000 * attempt);
+  }
+  return false;
+}
+
 const FALLBACK_TAG_COUNT = 5;
 
 /**
@@ -245,7 +280,7 @@ function nextTags(tags, failedAttempt) {
  * nên thử lại với tag mới không sinh video trùng. Lỗi quota/tài khoản -> CredentialError để đổi secret.
  * Lỗi khác -> dừng và báo nguyên nhân.
  */
-export async function uploadVideo(file, meta, token) {
+export async function uploadVideo(file, meta, token, thumbnail = null) {
   const size = fs.statSync(file).size;
   log.info(`Kích thước video: ${formatBytes(size)}`);
   log.info(`Tiêu đề: ${meta.title}`);
@@ -258,7 +293,8 @@ export async function uploadVideo(file, meta, token) {
       const uploadUrl = await initiate(token, { ...meta, tags }, size);
       const video = await sendFile(token, uploadUrl, file, size);
       if (!video?.id) throw new StepError(STEP, `YouTube không trả về ID video: ${JSON.stringify(video).slice(0, 500)}`);
-      return { id: video.id, url: `https://www.youtube.com/watch?v=${video.id}`, tags };
+      const thumbnailSet = await setThumbnail(token, video.id, thumbnail);
+      return { id: video.id, url: `https://www.youtube.com/watch?v=${video.id}`, tags, thumbnailSet };
     } catch (e) {
       if (!(e instanceof TagError)) throw e;
       if (!tags.length) {
