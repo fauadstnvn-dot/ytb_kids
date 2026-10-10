@@ -45,7 +45,7 @@ export async function buildAudio(segments, musicFile, duration, workDir, fullVoi
   const filters = [`[0:a]${fmt},asetpts=N/SR/TB,atrim=0:${dur},volume=${MUSIC_VOLUME},afade=t=out:st=${fadeStart}:d=2[m]`];
   const labels = ["[m]"];
   voiced.forEach((s, i) => {
-    const ms = Math.round(s.start * 1000);
+    const ms = Math.round((s.start + (s.lead || 0)) * 1000);
     filters.push(`[${i + 1}:a]${fmt},volume=${VOICE_VOLUME},adelay=${ms}:all=1[v${i}]`);
     labels.push(`[v${i}]`);
   });
