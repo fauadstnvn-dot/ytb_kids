@@ -73,7 +73,7 @@ export function loadStory(code, filename) {
   let api = null;
 
   const kbSegs = kb && (Array.isArray(kb.SEGMENTS) ? kb.SEGMENTS : kb.segments);
-  const hasFlip = !!(kb && (kb.__bookFlip || kb.__stageCurtain || kb.__filmClapper || kb.__comicPanel || kb.__polaroidAlbum) && typeof kb.drawScene === "function" && Array.isArray(kbSegs) && kbSegs.length);
+  const hasFlip = !!(kb && (kb.__bookFlip || kb.__stageCurtain || kb.__filmClapper || kb.__comicPanel || kb.__polaroidAlbum || kb.__retroTv || kb.__slideProjector || kb.__scrollParchment) && typeof kb.drawScene === "function" && Array.isArray(kbSegs) && kbSegs.length);
 
   if (hasFlip) {
     // File đã chèn hiệu ứng lật sách: window.KICHBAN_SCRIPT là bản ĐÃ bọc (có bìa, lật trang, trang kết,
@@ -98,13 +98,13 @@ export function loadStory(code, filename) {
       },
       bookFlip: true,
       fx: {
-        name: kb.__polaroidAlbum ? "polaroidAlbum" : kb.__comicPanel ? "comicPanel" : kb.__filmClapper ? "filmClapper" : kb.__stageCurtain ? "stageCurtain" : "bookFlip",
+        name: kb.__scrollParchment ? "scrollParchment" : kb.__slideProjector ? "slideProjector" : kb.__retroTv ? "retroTv" : kb.__polaroidAlbum ? "polaroidAlbum" : kb.__comicPanel ? "comicPanel" : kb.__filmClapper ? "filmClapper" : kb.__stageCurtain ? "stageCurtain" : "bookFlip",
         leadStory: Number(kb.fxTiming && kb.fxTiming.leadStory) || FLIP_LEAD_STORY,
         leadEdge: Number(kb.fxTiming && kb.fxTiming.leadEdge) || FLIP_LEAD_EDGE,
         extra: Number(kb.fxTiming && kb.fxTiming.extra) || FLIP_EXTRA,
       },
     };
-    log.info(`Phát hiện hiệu ứng video (${kb.__polaroidAlbum ? "PolaroidAlbumKB - album ảnh Polaroid" : kb.__comicPanel ? "ComicPanelKB - khung truyện tranh" : kb.__filmClapper ? "FilmClapperKB - bảng clapper điện ảnh" : kb.__stageCurtain ? "StageCurtainKB - rèm sân khấu" : "BookFlipKB - lật trang sách"}): dùng KICHBAN_SCRIPT, ${kbSegs.length} cảnh (gồm bìa + trang kết).`);
+    log.info(`Phát hiện hiệu ứng video (${kb.__scrollParchment ? "ScrollParchmentKB - cuộn giấy da mở ngang" : kb.__slideProjector ? "SlideProjectorKB - máy chiếu slide" : kb.__retroTv ? "RetroTvKB - TV đời cũ chuyển kênh" : kb.__polaroidAlbum ? "PolaroidAlbumKB - album ảnh Polaroid" : kb.__comicPanel ? "ComicPanelKB - khung truyện tranh" : kb.__filmClapper ? "FilmClapperKB - bảng clapper điện ảnh" : kb.__stageCurtain ? "StageCurtainKB - rèm sân khấu" : "BookFlipKB - lật trang sách"}): dùng KICHBAN_SCRIPT, ${kbSegs.length} cảnh (gồm bìa + trang kết).`);
   } else if (sb && Array.isArray(sb.SEGMENTS) && typeof sb.drawScene === "function") {
     api = {
       segments: sb.SEGMENTS,
