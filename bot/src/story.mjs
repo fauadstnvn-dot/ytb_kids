@@ -73,7 +73,7 @@ export function loadStory(code, filename) {
   let api = null;
 
   const kbSegs = kb && (Array.isArray(kb.SEGMENTS) ? kb.SEGMENTS : kb.segments);
-  const hasFlip = !!(kb && kb.__bookFlip && typeof kb.drawScene === "function" && Array.isArray(kbSegs) && kbSegs.length);
+  const hasFlip = !!(kb && (kb.__bookFlip || kb.__stageCurtain) && typeof kb.drawScene === "function" && Array.isArray(kbSegs) && kbSegs.length);
 
   if (hasFlip) {
     // File đã chèn hiệu ứng lật sách: window.KICHBAN_SCRIPT là bản ĐÃ bọc (có bìa, lật trang, trang kết,
@@ -97,8 +97,14 @@ export function loadStory(code, filename) {
         tags: kb.tags,
       },
       bookFlip: true,
+      fx: {
+        name: kb.__stageCurtain ? "stageCurtain" : "bookFlip",
+        leadStory: Number(kb.fxTiming && kb.fxTiming.leadStory) || FLIP_LEAD_STORY,
+        leadEdge: Number(kb.fxTiming && kb.fxTiming.leadEdge) || FLIP_LEAD_EDGE,
+        extra: Number(kb.fxTiming && kb.fxTiming.extra) || FLIP_EXTRA,
+      },
     };
-    log.info(`Phát hiện hiệu ứng lật trang sách (BookFlipKB): dùng KICHBAN_SCRIPT, ${kbSegs.length} cảnh (gồm bìa + trang kết).`);
+    log.info(`Phát hiện hiệu ứng video (${kb.__stageCurtain ? "StageCurtainKB - rèm sân khấu" : "BookFlipKB - lật trang sách"}): dùng KICHBAN_SCRIPT, ${kbSegs.length} cảnh (gồm bìa + trang kết).`);
   } else if (sb && Array.isArray(sb.SEGMENTS) && typeof sb.drawScene === "function") {
     api = {
       segments: sb.SEGMENTS,
@@ -153,9 +159,10 @@ export function loadStory(code, filename) {
       end: 0,
       narration: null,
       // Đoạn mở đầu (lật trang + phóng vào tranh) mà giọng đọc phải chờ; 0 nếu không có hiệu ứng sách.
-      leadMax: api.bookFlip ? (i === 0 || i === api.segments.length - 1 ? FLIP_LEAD_EDGE : FLIP_LEAD_STORY) : 0,
+      leadMax: api.bookFlip ? (i === 0 || i === api.segments.length - 1 ? api.fx.leadEdge : api.fx.leadStory) : 0,
       scalesWithDuration: !!api.bookFlip && i !== 0 && i !== api.segments.length - 1,
       lead: 0,
+      fxExtra: api.bookFlip ? api.fx.extra : FLIP_EXTRA,
     };
   });
 
@@ -189,7 +196,7 @@ export function retimeSegments(segments, minTotal = 0) {
     if (lead && seg.scalesWithDuration) {
       // Hiệu ứng co đoạn mở đầu theo sc = min(1, D*0.55/EXTRA) khi cảnh ngắn; giải lặp cho khớp.
       for (let k = 0; k < 4; k++) {
-        lead = seg.leadMax * Math.min(1, (dur * 0.55) / FLIP_EXTRA);
+        lead = seg.leadMax * Math.min(1, (dur * 0.55) / (seg.fxExtra || FLIP_EXTRA));
         dur = fit(lead);
       }
     }
