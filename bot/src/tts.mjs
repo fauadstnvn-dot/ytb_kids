@@ -116,60 +116,104 @@ async function fetchChunk(text, lang) {
   }
   throw new StepError(STEP, `Google TTS không trả về MP3 cho đoạn "${text.slice(0, 60)}…" sau 4 lần thử (${lastErr}).`);
 }
-
-/** Số nửa cung nâng cao độ để ra giọng trẻ em (mặc định +5, chỉnh bằng biến môi trường TTS_PITCH_SEMITONES). */
-const PITCH_SEMITONES = envNum("TTS_PITCH_SEMITONES", 5);
+/** Số nửa cung của lời dẫn khi kịch bản không khai báo (mặc định +5 = giọng trẻ em). Biến môi trường TTS_PITCH_SEMITONES (>0) ghi đè. */
+const NARRATOR_PITCH_OVERRIDE = envNum("TTS_PITCH_SEMITONES", NaN);
+/** Khoảng lặng giữa lời dẫn và các lượt thoại (giây). */
+const GAP_AFTER_NARRATION = 0.4;
+const GAP_BETWEEN_LINES = 0.3;
 
 /**
- * Chuyển MP3 -> WAV mono 48kHz và nâng giọng +N nửa cung nhưng GIỮ NGUYÊN tốc độ đọc
- * (tương đương Tone.PitchShift + highshelf 3kHz +4dB trong xyz.php).
+ * Chuyển MP3 -> WAV mono 48kHz và đổi cao độ `semitones` nửa cung nhưng GIỮ NGUYÊN tốc độ đọc
+ * (dương = giọng cao hơn: trẻ em/phụ nữ; âm = giọng trầm hơn: ông già/chó sói...).
  * Ưu tiên bộ lọc rubberband (chất lượng tốt); nếu bản ffmpeg không có thì dùng asetrate + atempo.
  */
-async function toChildVoice(mp3, wav) {
-  const base = ["-y", "-hide_banner", "-loglevel", "error", "-i", mp3];
+async function toVoice(input, wav, semitones) {
+  const base = ["-y", "-hide_banner", "-loglevel", "error", "-i", input];
   const tail = ["-ar", String(SAMPLE_RATE), "-ac", "1", wav];
-  const shelf = "highshelf=f=3000:g=4";
-  if (!PITCH_SEMITONES) {
+  // Highshelf làm giọng cao sáng hơn; giọng trầm thì bỏ để không bị gắt.
+  const shelf = semitones >= 3 ? "highshelf=f=3000:g=4" : semitones <= -3 ? "lowshelf=f=200:g=3" : "anull";
+  if (!semitones) {
     await run("ffmpeg", [...base, "-af", shelf, ...tail], { step: STEP });
     return;
   }
-  const ratio = Math.pow(2, PITCH_SEMITONES / 12);
+  const ratio = Math.pow(2, semitones / 12);
   try {
     await run("ffmpeg", [...base, "-af", `rubberband=pitch=${ratio.toFixed(6)},${shelf}`, ...tail], { step: STEP });
   } catch {
-    log.info("ffmpeg không có rubberband, dùng asetrate + atempo để nâng giọng.");
+    log.info("ffmpeg không có rubberband, dùng asetrate + atempo để đổi cao độ.");
     const af = `aresample=${SAMPLE_RATE},asetrate=${Math.round(SAMPLE_RATE * ratio)},aresample=${SAMPLE_RATE},atempo=${(1 / ratio).toFixed(6)},${shelf}`;
     await run("ffmpeg", [...base, "-af", af, ...tail], { step: STEP });
   }
 }
 
-/** Tạo file WAV giọng đọc cho mỗi cảnh (đọc phần "action"), gắn {file, duration} vào seg.narration. */
+/** Đọc một câu/đoạn bằng Google TTS rồi đổi cao độ -> WAV; trả {file, duration}. */
+async function synthesizeLine(text, lang, semitones, dir, name) {
+  const chunks = splitText(text);
+  const files = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const f = path.join(dir, `${name}_${i}.mp3`);
+    await fs.writeFile(f, await fetchChunk(chunks[i].text, lang));
+    files.push(f);
+    await sleep(250);
+  }
+  const pauses = chunks.map((c, i) => (i === chunks.length - 1 ? 0 : PAUSE[c.end]));
+  const joined = path.join(dir, `${name}_joined.wav`);
+  const wav = path.join(dir, `${name}.wav`);
+  await joinChunks(files, pauses, joined);
+  await toVoice(joined, wav, semitones);
+  return { file: wav, duration: await probeDuration(wav, STEP) };
+}
+
+/**
+ * Tạo giọng đọc cho mỗi cảnh: lời dẫn (seg.narrationText, giọng trẻ em) rồi lần lượt từng lượt thoại
+ * (seg.dialogues, mỗi nhân vật một cao độ). Ghép thành một WAV; gắn seg.narration = {file, duration}
+ * và seg.voiceParts = [{kind, speaker, label, text, color, start, end}] (giây, tính từ đầu giọng của cảnh).
+ */
 export async function synthesizeNarration(segments, workDir) {
-  const lang = detectLang(segments.map((s) => s.narrationText));
+  const texts = segments.flatMap((s) => [s.narrationText, ...(s.dialogues || []).map((d) => d.text)]).filter(Boolean);
+  const lang = detectLang(texts);
   log.info(`Ngôn ngữ giọng đọc: ${lang}`);
   const dir = path.join(workDir, "tts");
   await fs.mkdir(dir, { recursive: true });
 
   for (const seg of segments) {
-    if (!seg.narrationText) {
+    const lines = [];
+    if (seg.narrationText) {
+      const pitch = Number.isFinite(NARRATOR_PITCH_OVERRIDE) ? NARRATOR_PITCH_OVERRIDE : seg.narratorPitch;
+      lines.push({ kind: "narration", speaker: "narrator", label: "Narrator", text: seg.narrationText, pitch, color: null });
+    }
+    for (const d of seg.dialogues || []) lines.push({ kind: "dialogue", ...d });
+
+    if (!lines.length) {
       seg.narration = null;
+      seg.voiceParts = [];
       continue;
     }
-    const chunks = splitText(seg.narrationText);
-    const files = [];
-    for (let i = 0; i < chunks.length; i++) {
-      const f = path.join(dir, `seg_${seg.index}_${i}.mp3`);
-      await fs.writeFile(f, await fetchChunk(chunks[i].text, lang));
-      files.push(f);
-      await sleep(250);
+
+    const rendered = [];
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i];
+      const r = await synthesizeLine(ln.text, lang, ln.pitch, dir, `seg_${seg.index}_p${i}`);
+      rendered.push({ ...ln, ...r });
     }
-    const pauses = chunks.map((c, i) => (i === chunks.length - 1 ? 0 : PAUSE[c.end]));
-    const joined = path.join(dir, `seg_${seg.index}_joined.wav`);
+
+    const pauses = rendered.map((p, i) => (i === rendered.length - 1 ? 0 : p.kind === "narration" ? GAP_AFTER_NARRATION : GAP_BETWEEN_LINES));
+    let cursor = 0;
+    seg.voiceParts = rendered.map((p, i) => {
+      const part = { kind: p.kind, speaker: p.speaker, label: p.label, text: p.text, color: p.color, pitch: p.pitch, start: cursor, end: cursor + p.duration };
+      cursor += p.duration + pauses[i];
+      return part;
+    });
+
     const wav = path.join(dir, `seg_${seg.index}.wav`);
-    await joinChunks(files, pauses, joined);
-    await toChildVoice(joined, wav);
+    if (rendered.length === 1) {
+      await fs.copyFile(rendered[0].file, wav);
+    } else {
+      await joinChunks(rendered.map((p) => p.file), pauses, wav);
+    }
     const duration = await probeDuration(wav, STEP);
     seg.narration = { file: wav, duration };
-    log.info(`  Cảnh ${seg.index + 1} "${seg.title}": ${duration.toFixed(2)}s giọng đọc`);
+    const who = rendered.filter((p) => p.kind === "dialogue").map((p) => `${p.label} ${p.pitch >= 0 ? "+" : ""}${p.pitch}`);
+    log.info(`  Cảnh ${seg.index + 1} "${seg.title}": ${duration.toFixed(2)}s giọng (lời dẫn${who.length ? " + " + who.join(", ") : ""})`);
   }
 }
