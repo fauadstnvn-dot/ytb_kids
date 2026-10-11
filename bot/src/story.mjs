@@ -273,6 +273,18 @@ function applyAutoZoom(segments) {
   });
 }
 
+/**
+ * Ai đang nói thoại tại localT và miệng mở bao nhiêu (0..1) để drawScene vẽ nhép miệng.
+ * Lời dẫn (narrator) không tính vì người kể không xuất hiện trong khung hình.
+ */
+export function talkingAt(seg, localT) {
+  const parts = seg.raw?.voiceParts;
+  const part = parts?.find((p) => p.kind === "dialogue" && localT >= p.start && localT < p.end);
+  if (!part) return { speaker: null, mouth: 0 };
+  const m = 0.25 + 0.75 * Math.abs(Math.sin(localT * 14)) * (0.6 + 0.4 * Math.abs(Math.sin(localT * 5.3 + 1)));
+  return { speaker: part.speaker, mouth: Math.max(0, Math.min(1, m)) };
+}
+
 /** Camera của cảnh tại thời điểm localT: { scale, ox, oy } hoặc null nếu cảnh không dùng zoom. */
 export function cameraAt(seg, localT, width, height) {
   if (!seg.zoom && !seg.zoomTo) return null;
