@@ -98,8 +98,8 @@ function drawBubble(ctx, W, H, win, side, t) {
   const h = lines.length * lineH + padY * 2;
   const x = side === "left" ? W * 0.07 : W * 0.93 - w;
   const y = H * 0.07 + 24 * S;
-  const tailH = 34 * S;
-  const tailX = side === "left" ? x + w * 0.28 : x + w * 0.72;
+  const tailH = 0;
+  const tailX = x + w / 2;
 
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -111,7 +111,7 @@ function drawBubble(ctx, W, H, win, side, t) {
   ctx.shadowColor = "rgba(0,0,0,0.35)";
   ctx.shadowBlur = 14 * S;
   ctx.shadowOffsetY = 4 * S;
-  bubblePath(ctx, x, y, w, h, 22 * S, tailX, 16 * S, tailH);
+  bubblePath(ctx, x, y, w, h, 22 * S, tailX, 0, tailH);
   ctx.fillStyle = "#fffdf6";
   ctx.fill();
   ctx.shadowColor = "transparent";
