@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { GlobalFonts, createCanvas } from "@napi-rs/canvas";
 import { drawCaption } from "./caption.mjs";
 import { browserLikeContext } from "./ctx-compat.mjs";
+import { cameraAt } from "./story.mjs";
 import { StepError, StoryError, envStr, formatBytes, log, probeDuration, run } from "./utils.mjs";
 
 const AUDIO_STEP = "Trộn nhạc nền + giọng đọc";
@@ -221,6 +222,8 @@ export async function renderVideo(story, audioFile, duration, workDir, { width, 
     // nhưng nếu lỗi quá nhiều khung thì dừng hẳn và báo nguyên nhân.
     rawCtx.save();
     try {
+      const cam = cameraAt(seg, localT, width, height);
+      if (cam) rawCtx.setTransform(cam.scale, 0, 0, cam.scale, cam.ox, cam.oy);
       story.drawScene(seg.raw, localT);
     } catch (e) {
       frameErrors++;
