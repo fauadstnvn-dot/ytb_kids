@@ -72,7 +72,7 @@ function bubblePath(ctx, x, y, w, h, r, tailX, tailW, tailH) {
 }
 
 /** Hộp thoại kiểu truyện tranh: chứa đủ toàn bộ lời nói, kèm tên nhân vật, đuôi chỉ xuống phía nhân vật. */
-function drawBubble(ctx, W, H, win, side, t) {
+function drawBubble(ctx, W, H, win, side, t, lowered = false) {
   const S = H / 720;
   const age = clamp((t - win.from) / 0.25, 0, 1);
   const fade = clamp((win.to - t) / 0.2, 0, 1);
@@ -98,7 +98,7 @@ function drawBubble(ctx, W, H, win, side, t) {
   const h = lines.length * lineH + padY * 2;
   const hasX = Number.isFinite(win.x);
   const x = hasX ? clamp(win.x * W - w / 2, W * 0.04, W * 0.96 - w) : side === "left" ? W * 0.07 : W * 0.93 - w;
-  const y = H * 0.07 + 24 * S;
+  const y = lowered ? H * 0.27 + 24 * S : H * 0.07 + 24 * S;
   const tailH = 0;
   const tailX = x + w / 2;
 
@@ -150,13 +150,22 @@ function easeOutBack(t) {
   return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
 }
 
+// Cảnh có câu hỏi (holdAfterVoice > 0): từ lúc câu hỏi bắt đầu, bảng câu hỏi chiếm vùng trên cùng nên hạ hộp thoại xuống thấp hơn.
+// Kịch bản cũ không có holdAfterVoice -> luôn false, giữ nguyên vị trí cũ.
+function questionActive(seg, t) {
+  if (!(seg.holdAfterVoice > 0)) return false;
+  const parts = seg.raw?.voiceParts;
+  const from = parts?.length ? parts[parts.length - 1].start - 0.1 : (seg.end - seg.start) * 0.6;
+  return t >= from;
+}
+
 function drawDialogueBubbles(ctx, W, H, seg, t) {
   const wins = dialogueWindows(seg);
   if (!wins.length) return;
   const sides = new Map();
   for (const w of wins) if (!sides.has(w.speaker)) sides.set(w.speaker, sides.size % 2 === 0 ? "left" : "right");
   for (const w of wins) {
-    if (t >= w.from && t < w.to) drawBubble(ctx, W, H, w, sides.get(w.speaker), t);
+    if (t >= w.from && t < w.to) drawBubble(ctx, W, H, w, sides.get(w.speaker), t, questionActive(seg, t));
   }
 }
 
