@@ -203,6 +203,10 @@ export function loadStory(code, filename) {
       narrationText: String(seg.action || "").trim(),
       narratorPitch: clampPitch(seg.narratorPitch, DEFAULT_NARRATOR_PITCH),
       dialogues: normalizeDialogues(seg.dialogues),
+      // Tùy chọn (kịch bản cũ không có thì = 0 / false): lặng X giây sau khi đọc xong để trẻ "suy nghĩ" (sau câu hỏi),
+      // và đánh dấu cảnh hook mở đầu để chọn ảnh đại diện.
+      holdAfterVoice: Math.max(0, Math.min(8, Number(seg.holdAfterVoice) || 0)),
+      isHook: seg.hook === true || /^hook/i.test(String(seg.key || "")),
       origStart: Number.isFinite(start) ? start : 0,
       origDuration: dur,
       start: 0,
@@ -236,7 +240,7 @@ export function retimeSegments(segments, minTotal = 0) {
   for (const seg of segments) {
     const narr = seg.narration?.duration || 0;
     let lead = narr > 0 ? seg.leadMax : 0;
-    const tail = seg.leadMax ? TAIL_GAP : NARR_PAD;
+    const tail = (seg.leadMax ? TAIL_GAP : NARR_PAD) + (narr > 0 ? seg.holdAfterVoice || 0 : 0);
     const fit = (l) => {
       if (!(narr > 0)) return seg.origDuration;
       const need = l + narr + tail;
@@ -256,6 +260,23 @@ export function retimeSegments(segments, minTotal = 0) {
     // Script vẽ dựa trên start/end của chính object cảnh.
     seg.raw.start = seg.start;
     seg.raw.end = seg.end;
+    // Mốc giọng đọc thật (giây TRONG cảnh, đã cộng lead) để drawScene bám theo: câu hỏi, thần chú, vật ẩn...
+    // Kịch bản cũ không đọc các trường này nên không bị ảnh hưởng.
+    if (narr > 0 && seg.voiceParts?.length) {
+      seg.raw.voiceParts = seg.voiceParts.map((p) => ({
+        kind: p.kind,
+        speaker: p.speaker,
+        text: p.text,
+        start: lead + p.start,
+        end: lead + p.end,
+      }));
+      seg.raw.voiceStart = lead;
+      seg.raw.voiceEnd = lead + narr;
+    } else {
+      delete seg.raw.voiceParts;
+      delete seg.raw.voiceStart;
+      delete seg.raw.voiceEnd;
+    }
     cursor += dur;
   }
   // Có mp3 riêng dài hơn tổng các cảnh: kéo dài cảnh cuối để video không cắt ngang mp3.
@@ -282,7 +303,9 @@ export function pickThumbnailTime(story) {
   const segs = story.segments;
   const fx = !!story.bookFlip;
   const pool = fx && segs.length > 2 ? segs.slice(1, -1) : segs;
-  const seg = pool[Math.min(Math.floor(pool.length / 3), pool.length - 1)];
+  // Ưu tiên khung hình của cảnh hook (nếu kịch bản có); kịch bản cũ không có thì giữ cách chọn cũ.
+  const hook = segs.find((s) => s.isHook && s.end - s.start > 3);
+  const seg = hook || pool[Math.min(Math.floor(pool.length / 3), pool.length - 1)];
   const dur = seg.end - seg.start;
   const head = fx ? Math.max(seg.lead || 0, seg.leadMax || 0) + THUMB_HEAD_GUARD : 0.5;
   const tail = fx ? THUMB_TAIL_GUARD : 0.5;
