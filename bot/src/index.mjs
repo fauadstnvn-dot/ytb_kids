@@ -107,6 +107,11 @@ async function buildVideo(storyFile, musicLocal, baseDir, attempt) {
     log.info(`Tổng thời lượng sau khi căn theo giọng đọc: ${formatTimestamp(duration)} (${duration.toFixed(1)}s)`);
   }
 
+  const hookSeg = story.segments.find((s) => s.isHook);
+  if (hookSeg && hookSeg.end - hookSeg.start > 12) {
+    log.warn(`Cảnh hook "${hookSeg.key}" dài ${(hookSeg.end - hookSeg.start).toFixed(1)}s (>12s): rút gọn lời dẫn/thoại để giữ chân người xem 5-15 giây đầu.`);
+  }
+
   // Phải dựng lại mô tả SAU retimeSegments: trước đó mọi seg.start = 0 nên chapters đều là 0:00.
   meta = buildYouTubeMeta(story, metaName);
 
@@ -142,7 +147,7 @@ async function main() {
   log.step("2. Đăng nhập FTP và chọn ngẫu nhiên nhạc nền");
   const musicFile = await pickMusic(musicLocal);
 
-  // Kịch bản hỏng (không chạy/không vẽ được bằng canvas) -> xoá và chọn kịch bản khác.
+  // Kịch bản hỏng (không chạy/không vẽ được bằng canvas) -> xoá và chọn kịch bản kh��c.
   // Mọi lỗi khác (FTP, TTS, ffmpeg, YouTube...) vẫn dừng ngay và báo nguyên nhân.
   const broken = [];
   let storyFile;
