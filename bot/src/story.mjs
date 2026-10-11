@@ -21,7 +21,7 @@ export function normalizeDialogues(list) {
   if (!Array.isArray(list)) return [];
   const out = [];
   for (const d of list) {
-    const o = Array.isArray(d) ? { speaker: d[0], text: d[1], pitch: d[2] } : d && typeof d === "object" ? d : null;
+    const o = Array.isArray(d) ? { speaker: d[0], text: d[1], pitch: d[2], x: d[3] } : d && typeof d === "object" ? d : null;
     if (!o) continue;
     const text = String(o.text || "").replace(/\s+/g, " ").trim();
     if (!text) continue;
@@ -31,6 +31,7 @@ export function normalizeDialogues(list) {
       label: String(o.label || speaker).replace(/_/g, " ").trim(),
       text,
       pitch: clampPitch(o.pitch, 0),
+      x: o.x === null || o.x === undefined || o.x === "" || !Number.isFinite(Number(o.x)) ? null : Math.max(0, Math.min(1, Number(o.x))),
       color: typeof o.color === "string" && /^#[0-9a-f]{3,8}$/i.test(o.color) ? o.color : null,
     });
   }
