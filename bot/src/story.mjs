@@ -207,6 +207,10 @@ export function loadStory(code, filename) {
       // và đánh dấu cảnh hook mở đầu để chọn ảnh đại diện.
       holdAfterVoice: Math.max(0, Math.min(8, Number(seg.holdAfterVoice) || 0)),
       isHook: seg.hook === true || /^hook/i.test(String(seg.key || "")),
+      // Camera tùy chọn: zoom / zoom_to = wide | mid | close | extreme_close (hoặc số), focus = [x, y] (0..1). Không có -> giữ nguyên.
+      zoom: parseZoom(seg.zoom),
+      zoomTo: parseZoom(seg.zoomTo ?? seg.zoom_to),
+      focus: parseFocus(seg.focus),
       origStart: Number.isFinite(start) ? start : 0,
       origDuration: dur,
       start: 0,
@@ -220,7 +224,71 @@ export function loadStory(code, filename) {
     };
   });
 
+  applyAutoZoom(segments);
+
   return { ...api, segments, filename };
+}
+
+const ZOOM_LEVELS = { wide: 1, mid: 1.12, close: 1.28, extreme_close: 1.5 };
+// Cảnh có câu hỏi: bảng câu hỏi nằm gần mép trên nên không phóng quá mức để khỏi cắt mất.
+const QUESTION_MAX_ZOOM = 1.1;
+
+function parseZoom(v) {
+  if (v === undefined || v === null || v === "") return 0;
+  if (typeof v === "number" || /^[\d.]+$/.test(String(v))) {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.max(1, Math.min(1.8, n)) : 0;
+  }
+  const key = String(v).toLowerCase().replace(/[\s-]+/g, "_");
+  return ZOOM_LEVELS[key] || 0;
+}
+
+function parseFocus(v) {
+  if (!Array.isArray(v) || v.length < 2) return null;
+  const x = Number(v[0]);
+  const y = Number(v[1]);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return [Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y))];
+}
+
+// Kịch bản cũ không khai báo zoom ở cảnh nào: tự luân phiên zoom gần dần / xa dần để các cảnh không đơn điệu.
+// Tắt bằng biến môi trường AUTO_ZOOM=0.
+const AUTO_ZOOM_PLAN = [
+  ["wide", "mid"],
+  ["close", "mid"],
+  ["mid", "close"],
+  ["wide", "close"],
+  ["close", "wide"],
+  ["mid", "wide"],
+];
+
+function applyAutoZoom(segments) {
+  if (process.env.AUTO_ZOOM === "0") return;
+  if (segments.some((s) => s.zoom || s.zoomTo)) return;
+  segments.forEach((seg, i) => {
+    if (i === 0 || i === segments.length - 1) return;
+    const [a, b] = AUTO_ZOOM_PLAN[(i - 1) % AUTO_ZOOM_PLAN.length];
+    seg.zoom = ZOOM_LEVELS[a];
+    seg.zoomTo = ZOOM_LEVELS[b];
+  });
+}
+
+/** Camera của cảnh tại thời điểm localT: { scale, ox, oy } hoặc null nếu cảnh không dùng zoom. */
+export function cameraAt(seg, localT, width, height) {
+  if (!seg.zoom && !seg.zoomTo) return null;
+  const hasQuestion = seg.holdAfterVoice > 0;
+  const cap = (z) => (hasQuestion ? Math.min(z, QUESTION_MAX_ZOOM) : z);
+  const z0 = cap(seg.zoom || seg.zoomTo);
+  const z1 = cap(seg.zoomTo || seg.zoom);
+  const dur = Math.max(0.1, seg.end - seg.start);
+  const p = Math.max(0, Math.min(1, localT / dur));
+  const e = p * p * (3 - 2 * p);
+  const scale = z0 + (z1 - z0) * e;
+  if (scale <= 1.0001) return null;
+  const [fx, fy] = seg.focus || [0.5, 0.5];
+  const ox = Math.max(width - width * scale, Math.min(0, width * fx - width * fx * scale));
+  const oy = Math.max(height - height * scale, Math.min(0, height * fy - height * fy * scale));
+  return { scale, ox, oy };
 }
 
 const NARR_PAD = 0.7;
