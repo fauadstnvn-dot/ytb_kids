@@ -233,6 +233,7 @@ const FLIP_EXTRA = 3.5;
 // luôn nằm trong [TAIL_GAP, TAIL_GAP + MAX_TAIL_SLACK] = 1.5-2.0s.
 const TAIL_GAP = 1.5;
 const MAX_TAIL_SLACK = 0.5;
+const MIN_SCENE = 4;
 
 /** Kéo dài mỗi cảnh để >= thời lượng giọng đọc + đệm (giống retimeTimeline của index.php). */
 export function retimeSegments(segments, minTotal = 0) {
@@ -244,7 +245,8 @@ export function retimeSegments(segments, minTotal = 0) {
     const fit = (l) => {
       if (!(narr > 0)) return seg.origDuration;
       const need = l + narr + tail;
-      return seg.leadMax ? Math.min(Math.max(seg.origDuration, need), need + MAX_TAIL_SLACK) : Math.max(seg.origDuration, need);
+      // Cảnh có giọng đọc: kết thúc ngay sau khi đọc xong + đệm (không giữ thời lượng gốc của kịch bản, tránh chờ lâu mới chuyển cảnh).
+      return Math.min(Math.max(MIN_SCENE, need), need + MAX_TAIL_SLACK);
     };
     let dur = fit(lead);
     if (lead && seg.scalesWithDuration) {
