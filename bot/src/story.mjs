@@ -5,6 +5,52 @@ import { StoryError as StepError, formatTimestamp, log } from "./utils.mjs";
 
 const STEP = "Đọc kịch bản";
 
+export const DEFAULT_NARRATOR_PITCH = 5;
+const DEFAULT_BUBBLE_COLORS = ["#fff4cf", "#d7e8c4", "#f9d6df", "#cfe3f5", "#e4dcf7", "#ffd0a8", "#c8f0ee"];
+
+export function clampPitch(value, fallback = 0) {
+  const n = Number(value);
+  return Math.max(-12, Math.min(12, Math.round(Number.isFinite(n) ? n : fallback)));
+}
+
+/**
+ * Cấu trúc mới: seg.dialogues = [{ speaker, label, text, pitch }] (hoặc [speaker, text, pitch]).
+ * pitch là số nửa cung so với giọng Google Translate gốc (dương = cao hơn, âm = trầm hơn).
+ */
+export function normalizeDialogues(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const d of list) {
+    const o = Array.isArray(d) ? { speaker: d[0], text: d[1], pitch: d[2] } : d && typeof d === "object" ? d : null;
+    if (!o) continue;
+    const text = String(o.text || "").replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    const speaker = String(o.speaker || o.who || "voice").trim() || "voice";
+    out.push({
+      speaker,
+      label: String(o.label || speaker).replace(/_/g, " ").trim(),
+      text,
+      pitch: clampPitch(o.pitch, 0),
+      color: typeof o.color === "string" && /^#[0-9a-f]{3,8}$/i.test(o.color) ? o.color : null,
+    });
+  }
+  // Màu bong bóng ổn định theo từng nhân vật nếu kịch bản không khai báo.
+  const seen = new Map();
+  for (const d of out) {
+    if (!d.color) {
+      if (!seen.has(d.speaker)) seen.set(d.speaker, DEFAULT_BUBBLE_COLORS[(hashStr(d.speaker) % DEFAULT_BUBBLE_COLORS.length)]);
+      d.color = seen.get(d.speaker);
+    }
+  }
+  return out;
+}
+
+function hashStr(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
 /**
  * Trình duyệt có `document.createElement("canvas")`; sandbox Node thì không. Hiệu ứng lật trang sách
  * (BookFlipKB) và cache layer của kịch bản đều cần canvas phụ, nếu thiếu nó sẽ ném lỗi ở MỌI khung
@@ -152,7 +198,10 @@ export function loadStory(code, filename) {
       index: i,
       key: String(seg.key || `scene_${i + 1}`),
       title: String(seg.title || `Scene ${i + 1}`),
+      // action = chỉ lời dẫn cảnh (giọng trẻ em); lời nhân vật nằm riêng trong dialogues.
       narrationText: String(seg.action || "").trim(),
+      narratorPitch: clampPitch(seg.narratorPitch, DEFAULT_NARRATOR_PITCH),
+      dialogues: normalizeDialogues(seg.dialogues),
       origStart: Number.isFinite(start) ? start : 0,
       origDuration: dur,
       start: 0,
@@ -175,7 +224,7 @@ const NARR_PAD = 0.7;
 const FLIP_LEAD_STORY = 1.75;
 const FLIP_LEAD_EDGE = 1.3;
 const FLIP_EXTRA = 3.5;
-// Khoảng lặng từ lúc đọc xong đến lúc bắt đầu lật sang cảnh sau (đã gồm cả đo��n thu nhỏ 0.8s cuối cảnh):
+// Khoảng lặng từ lúc đọc xong đến lúc bắt đầu lật sang cảnh sau (đã gồm cả đo���n thu nhỏ 0.8s cuối cảnh):
 // luôn nằm trong [TAIL_GAP, TAIL_GAP + MAX_TAIL_SLACK] = 1.5-2.0s.
 const TAIL_GAP = 1.5;
 const MAX_TAIL_SLACK = 0.5;
