@@ -200,7 +200,7 @@ export async function synthesizeNarration(segments, workDir) {
     const pauses = rendered.map((p, i) => (i === rendered.length - 1 ? 0 : p.kind === "narration" ? GAP_AFTER_NARRATION : GAP_BETWEEN_LINES));
     let cursor = 0;
     seg.voiceParts = rendered.map((p, i) => {
-      const part = { kind: p.kind, speaker: p.speaker, label: p.label, text: p.text, color: p.color, pitch: p.pitch, start: cursor, end: cursor + p.duration };
+      const part = { kind: p.kind, speaker: p.speaker, label: p.label, text: p.text, color: p.color, pitch: p.pitch, x: p.x ?? null, start: cursor, end: cursor + p.duration };
       cursor += p.duration + pauses[i];
       return part;
     });
