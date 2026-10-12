@@ -72,14 +72,14 @@ function bubblePath(ctx, x, y, w, h, r, tailX, tailW, tailH) {
 }
 
 /** Hộp thoại kiểu truyện tranh: chứa đủ toàn bộ lời nói, kèm tên nhân vật, đuôi chỉ xuống phía nhân vật. */
-function drawBubble(ctx, W, H, win, side, t, lowered = false) {
-  const S = H / 720;
+function drawBubble(ctx, W, H, win, side, t, lowered = false, o = {}) {
+  const S = o.scale ?? H / 720;
   const age = clamp((t - win.from) / 0.25, 0, 1);
   const fade = clamp((win.to - t) / 0.2, 0, 1);
   const alpha = Math.min(age, fade);
   if (alpha <= 0) return;
 
-  const maxW = W * 0.46;
+  const maxW = W * (o.bubbleMaxW ?? 0.46);
   const padX = 26 * S;
   const padY = 18 * S;
   let px = Math.round(30 * S);
@@ -98,7 +98,7 @@ function drawBubble(ctx, W, H, win, side, t, lowered = false) {
   const h = lines.length * lineH + padY * 2;
   const hasX = Number.isFinite(win.x);
   const x = hasX ? clamp(win.x * W - w / 2, W * 0.04, W * 0.96 - w) : side === "left" ? W * 0.07 : W * 0.93 - w;
-  const y = lowered ? H * 0.27 + 24 * S : H * 0.07 + 24 * S;
+  const y = o.bubbleTop != null ? H * o.bubbleTop : lowered ? H * 0.27 + 24 * S : H * 0.07 + 24 * S;
   const tailH = 0;
   const tailX = x + w / 2;
 
@@ -159,23 +159,23 @@ function questionActive(seg, t) {
   return t >= from;
 }
 
-function drawDialogueBubbles(ctx, W, H, seg, t) {
+function drawDialogueBubbles(ctx, W, H, seg, t, o = {}) {
   const wins = dialogueWindows(seg);
   if (!wins.length) return;
   const sides = new Map();
   for (const w of wins) if (!sides.has(w.speaker)) sides.set(w.speaker, sides.size % 2 === 0 ? "left" : "right");
   for (const w of wins) {
-    if (t >= w.from && t < w.to) drawBubble(ctx, W, H, w, sides.get(w.speaker), t, questionActive(seg, t));
+    if (t >= w.from && t < w.to) drawBubble(ctx, W, H, w, sides.get(w.speaker), t, questionActive(seg, t), o);
   }
 }
 
-export function drawCaption(ctx, W, H, seg, t) {
-  drawDialogueBubbles(ctx, W, H, seg, t);
+export function drawCaption(ctx, W, H, seg, t, opts = {}) {
+  drawDialogueBubbles(ctx, W, H, seg, t, opts);
   const text = seg.narrationText;
   if (!text) return;
-  const S = H / 720;
+  const S = opts.scale ?? H / 720;
   const padX = 56 * S;
-  const padBottom = 48 * S;
+  const padBottom = opts.padBottom ?? 48 * S;
   const maxW = W - padX * 2;
   const px = Math.round(28 * S);
   const font = `400 ${px}px ${CAPTION_FONT_FAMILY}`;
