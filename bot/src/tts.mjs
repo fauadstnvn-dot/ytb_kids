@@ -217,3 +217,11 @@ export async function synthesizeNarration(segments, workDir) {
     log.info(`  Cảnh ${seg.index + 1} "${seg.title}": ${duration.toFixed(2)}s giọng (lời dẫn${who.length ? " + " + who.join(", ") : ""})`);
   }
 }
+
+/** Đọc một câu lẻ bằng cùng giọng lời dẫn (dùng cho lời kêu gọi cuối Short). Trả {file, duration}. */
+export async function synthesizeText(text, workDir, name, pitch = 5) {
+  const dir = path.join(workDir, "tts");
+  await fs.mkdir(dir, { recursive: true });
+  const semitones = Number.isFinite(NARRATOR_PITCH_OVERRIDE) ? NARRATOR_PITCH_OVERRIDE : pitch;
+  return synthesizeLine(text, detectLang([text]), semitones, dir, name);
+}
