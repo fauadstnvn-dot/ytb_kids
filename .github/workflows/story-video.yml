@@ -102,4 +102,5 @@ jobs:
           path: |
             bot/output.mp4
             bot/thumbnail.jpg
+            bot/short.mp4
           retention-days: 3
