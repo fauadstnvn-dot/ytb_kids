@@ -226,7 +226,10 @@ export function loadStory(code, filename) {
 
   applyAutoZoom(segments);
 
-  return { ...api, segments, filename };
+  // Phần kịch bản Short (tuỳ chọn). Script cũ không có thì = null và không dựng Short.
+  const shortSpec = sb?.YOUTUBE_SHORT || kb?.YOUTUBE_SHORT || sandbox.YOUTUBE_SHORT || null;
+
+  return { ...api, segments, filename, shortSpec };
 }
 
 const ZOOM_LEVELS = { wide: 1, mid: 1.12, close: 1.28, extreme_close: 1.5 };
