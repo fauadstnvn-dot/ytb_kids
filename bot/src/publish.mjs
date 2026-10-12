@@ -12,6 +12,18 @@ const STEP = "Upload YouTube";
  *  - Lỗi khác (mạng, file video, metadata...) -> dừng ngay vì đổi secret cũng không giải quyết được.
  * Danh sách được đọc NGAY TRƯỚC khi upload (không phải lúc bắt đầu) để dùng dữ liệu mới nhất sau hàng giờ dựng video.
  */
+/**
+ * Upload thêm 1 video (Short) bằng ĐÚNG secret đã dùng cho video dài để cả hai nằm trên cùng một kênh.
+ * Lỗi ở đây không được làm hỏng lượt chạy vì video dài đã lên kênh: nơi gọi tự bắt lỗi.
+ */
+export async function uploadWithSameCredential(cred, file, meta) {
+  const tokenResponse = await getAccessToken(cred);
+  await saveRefreshedToken(cred, tokenResponse);
+  const result = await uploadVideo(file, meta, tokenResponse.access_token, null);
+  await markUploadSuccess(cred);
+  return { ...result, credential: cred };
+}
+
 export async function uploadWithCredentialPool(file, meta, thumbnail = null) {
   const { credentials, total, tokenColumn } = await loadCredentialPool();
   if (!credentials.length) {
