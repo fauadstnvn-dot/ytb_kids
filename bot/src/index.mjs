@@ -6,7 +6,8 @@ import { buildAudio, renderVideo, validateStory } from "./render.mjs";
 import { buildYouTubeMeta, loadStory, pickThumbnailTime, retimeSegments } from "./story.mjs";
 import { synthesizeNarration } from "./tts.mjs";
 import { DB_ENV, loadCredentialPool } from "./credentials.mjs";
-import { uploadWithCredentialPool } from "./publish.mjs";
+import { uploadWithCredentialPool, uploadWithSameCredential } from "./publish.mjs";
+import { buildShort, buildShortMeta } from "./short.mjs";
 import { probeDuration, StepError, StoryError, envNum, envStr, formatBytes, formatTimestamp, log, requireEnv } from "./utils.mjs";
 
 // Đường dẫn FTP lấy từ GitHub Secret, không ghi cứng trong code và không in ra log để người khác không biết vị trí lưu trữ.
@@ -17,6 +18,7 @@ const WIDTH = envNum("VIDEO_WIDTH", 2560);
 const HEIGHT = envNum("VIDEO_HEIGHT", 1440);
 const FPS = envNum("VIDEO_FPS", 30);
 const DRY_RUN = envStr("DRY_RUN", "false") === "true";
+const SHORT_ENABLED = envStr("SHORT_ENABLED", "true") !== "false";
 
 async function summary(lines) {
   if (!process.env.GITHUB_STEP_SUMMARY) return;
@@ -122,7 +124,23 @@ async function buildVideo(storyFile, musicLocal, baseDir, attempt) {
   const thumb = pickThumbnailTime(story);
   log.info(`Ảnh đại diện lấy ở ${thumb.time.toFixed(1)}s trong cảnh "${thumb.seg.key}" (nằm trong cảnh quay, ngoài hiệu ứng chuyển cảnh).`);
   const { video, thumbnail } = await renderVideo(story, audio, duration, workDir, { width: WIDTH, height: HEIGHT, fps: FPS, thumbnailTime: thumb.time });
-  return { meta, video, thumbnail, duration };
+
+  // Short là phần phụ: mọi lỗi ở đây chỉ cảnh báo, KHÔNG làm hỏng video dài và KHÔNG xoá kịch bản.
+  let short = null;
+  if (SHORT_ENABLED && story.shortSpec) {
+    log.step("7b. Dựng YouTube Short từ phần YOUTUBE_SHORT của kịch bản");
+    try {
+      log.info("Short dùng chính nhạc nền của video dài (cùng file, cùng mức âm lượng).");
+      short = await buildShort({ story, musicFile: musicLocal, customVoice, workDir, fps: FPS });
+    } catch (e) {
+      log.warn(`Không dựng được Short (video dài vẫn đăng bình thường): ${e.message}`);
+    }
+  } else if (story.shortSpec) {
+    log.info("SHORT_ENABLED=false: bỏ qua Short.");
+  } else {
+    log.info("Kịch bản không có YOUTUBE_SHORT: chỉ đăng video dài.");
+  }
+  return { meta, video, thumbnail, duration, short };
 }
 
 async function main() {
@@ -170,7 +188,7 @@ async function main() {
       log.info("Chọn kịch bản khác...");
     }
   }
-  const { meta, video, thumbnail, duration } = built;
+  const { meta, video, thumbnail, duration, short } = built;
   const brokenLines = broken.length
     ? [`- Kịch bản lỗi đã ${DRY_RUN ? "bỏ qua" : "xoá"} (${broken.length}):`, ...broken.map((b) => `  - \`${b.name}\` — ${b.reason}`)]
     : [];
@@ -179,6 +197,10 @@ async function main() {
     const keep = path.resolve("output.mp4");
     await fs.copyFile(video, keep);
     if (thumbnail) await fs.copyFile(thumbnail, path.resolve("thumbnail.jpg"));
+    if (short) {
+      await fs.copyFile(short.video, path.resolve("short.mp4"));
+      log.info(`DRY_RUN: đã lưu ${path.resolve("short.mp4")} (${short.duration.toFixed(1)}s, cảnh: ${short.clips.join(", ")}).`);
+    }
     log.info(`DRY_RUN: đã lưu ${keep}, bỏ qua upload và xoá kịch bản.`);
     await summary([`### DRY_RUN: ${meta.title}`, `- Kịch bản: \`${storyFile.name}\``, `- Nhạc nền: \`${musicFile.name}\``, ...brokenLines]);
     return;
@@ -187,6 +209,22 @@ async function main() {
   log.step("8. Upload lên YouTube");
   const result = await uploadWithCredentialPool(video, meta, thumbnail);
   log.info(`Upload thành công bằng secret ${result.credential.label}: ${result.url}`);
+
+  // Short đăng NGAY sau video dài, cùng kênh, mô tả chứa link video dài vừa có.
+  let shortResult = null;
+  let shortError = "";
+  if (short) {
+    log.step("8b. Upload Short (kèm link video dài trong mô tả)");
+    try {
+      const shortMeta = buildShortMeta(short.spec, result.url, meta);
+      log.info(`Short: ${shortMeta.title}`);
+      shortResult = await uploadWithSameCredential(result.credential, short.video, shortMeta);
+      log.info(`Short đã đăng: https://www.youtube.com/shorts/${shortResult.id}`);
+    } catch (e) {
+      shortError = String(e.message).split("\n")[0];
+      log.warn(`Không đăng được Short (video dài đã lên kênh): ${e.message}`);
+    }
+  }
 
   log.step("9. Xoá kịch bản đã dùng trên FTP");
   await deleteRemote(storyFile.remotePath, "Xoá kịch bản trên FTP");
@@ -199,6 +237,11 @@ async function main() {
     `- Tag đã dùng (${result.tags.length}): ${result.tags.join(", ") || "(không)"}`,
     `- Secret đã dùng: ${result.credential.label}`,
     `- Ảnh đại diện: ${result.thumbnailSet ? "đã đặt" : "KHÔNG đặt được (xem log)"}`,
+    ...(shortResult
+      ? [`- Short: [https://www.youtube.com/shorts/${shortResult.id}](https://www.youtube.com/shorts/${shortResult.id}) — ${short.duration.toFixed(0)}s, cảnh: ${short.clips.join(", ")}`]
+      : short
+        ? [`- Short: KHÔNG đăng được — ${shortError}`]
+        : []),
     ...(result.failures.length
       ? [`- Secret bị bỏ qua (${result.failures.length}):`, ...result.failures.map((f) => `  - ${f.label} — ${f.reason}`)]
       : []),
