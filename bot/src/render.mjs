@@ -16,7 +16,7 @@ const VOICE_VOLUME = 0.95;
 const BUNDLED_FONT = fileURLToPath(new URL("../fonts/NotoSans-Regular.ttf", import.meta.url));
 
 let fontsLoaded = false;
-function loadFonts() {
+export function loadFonts() {
   if (fontsLoaded) return;
   if (fs.existsSync(BUNDLED_FONT)) GlobalFonts.registerFromPath(BUNDLED_FONT, "Noto Sans");
   for (const dir of ["/usr/share/fonts", "/usr/local/share/fonts"]) {
