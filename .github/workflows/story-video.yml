@@ -9,90 +9,49 @@ on:
         default: false
   schedule:
     # ======================================================================================
-    # LỊCH ĐĂNG THEO TUẦN — 63 video/tuần (9 video/ngày, cả 7 ngày). Giờ UTC.
+    # LỊCH ĐĂNG THEO TUẦN — 33 video/tuần. Giờ UTC.
+    #   • Ngày thường (T2–T6 theo UTC): 3 video/ngày  -> 15 video, chỉ vào 3 khung vàng nhất.
+    #   • Cuối tuần   (T7, CN theo UTC): 9 video/ngày -> 18 video, phủ kín các khung xem.
+    #
     # Mỗi lượt chạy SỚM ~37 PHÚT so với "giờ vàng" để bot kịp dựng + upload video.
-    # Dùng phút :23 thay vì :30 vì GitHub hay trễ lịch 10–60 phút ở các phút tròn (:00, :30)
-    # do quá nhiều workflow cùng đặt lịch -> phút lẻ giúp video lên đúng giờ vàng hơn.
+    # Dùng phút :23 thay vì :00/:30 vì GitHub hay trễ lịch 10–60 phút ở các phút tròn.
     # Thứ trong cron là thứ theo giờ UTC: 0=CN, 1=T2, 2=T3, 3=T4, 4=T5, 5=T6, 6=T7.
     #
-    # Thị trường ưu tiên (lượt xem hoạt hình tiếng Anh cho trẻ em nhiều nhất):
-    #   Mỹ > Ấn Độ > Anh > Philippines > Canada > Úc > Pakistan / Nigeria / Malaysia / Singapore
+    # Thị trường mục tiêu: TRẺ EM CÁC NƯỚC NÓI TIẾNG ANH BẢN NGỮ.
+    #   Mỹ (~60% lượt xem, ưu tiên số 1) > Anh > Canada > Úc > Ireland / New Zealand
+    #   Mỹ + Canada chung khung giờ (New York = Toronto, Los Angeles = Vancouver).
     #
-    # Giờ địa phương dưới đây tính theo giờ mùa hè (EDT/PDT/BST, AEDT). Khi Mỹ/Anh về giờ mùa đông
-    # (Anh: 25/10, Mỹ: 01/11) giờ địa phương ở Mỹ/Anh sẽ SỚM hơn 1 tiếng — vẫn nằm trong khung vàng.
+    # Giờ địa phương ghi theo GIỜ MÙA ĐÔNG (EST/PST/GMT, áp dụng từ Anh 25/10, Mỹ 01/11 đến
+    # tháng 3). Giờ mùa hè (EDT/PDT/BST) thì cộng thêm 1 tiếng — vẫn nằm trong khung vàng.
+    # Úc ghi theo AEDT (giờ mùa hè Úc, tháng 10 -> tháng 4).
     # Mọi lượt cách nhau tối thiểu 2 tiếng để lượt trước xong trước khi lượt sau bắt đầu.
     #
-    # Lưu ý quota YouTube API: mỗi lần upload ~1.600 đơn vị, mặc định 10.000 đơn vị/ngày/project.
-    # 9 lượt/ngày cần đủ token (YT_MAX_NUM) trong tb_bao_secret để xoay vòng.
+    # Quota YouTube API: mỗi upload ~1.600 đơn vị, mặc định 10.000 đơn vị/ngày/project.
+    # Cuối tuần 9 lượt/ngày -> cần đủ token (YT_MAX_NUM) trong tb_bao_secret để xoay vòng.
     # ======================================================================================
 
-    # ---------- HẰNG NGÀY (cả 7 ngày) ----------
+    # ---------- NGÀY THƯỜNG (T2–T6) — 3 khung vàng: giờ tan học & tối trước giờ ngủ ----------
+    # 16:00 UTC (chạy 15:23) — ANH + IRELAND: 4:00 PM London / Dublin (vừa tan học). = 23:00 VN.
+    # 21:00 UTC (chạy 20:23) — MỸ BỜ ĐÔNG + CANADA: 4:00 PM New York / Toronto (vừa tan học),
+    #   1:00 PM Los Angeles, 9:00 PM London. = 04:00 VN.
+    # 23:00 UTC (chạy 22:23) — MỸ CẢ 2 BỜ (khung mạnh nhất): 6:00 PM New York / Toronto
+    #   (giờ gia đình, trước giờ ngủ), 3:00 PM Los Angeles / Vancouver (tan học bờ Tây),
+    #   10:00 AM Sydney. = 06:00 VN.
+    - cron: "23 15,20,22 * * 1-5"
 
-    # Giờ vàng 01:00 UTC -> chạy 00:23 UTC (tối hôm trước ở Mỹ)
-    # = 6:00 PM Los Angeles / Vancouver (sau giờ học bờ Tây), 9:00 PM New York,
-    #   12:00 PM Sydney (trưa hôm sau). = 08:00 sáng giờ Việt Nam.
-    - cron: "23 0 * * *"
-
-    # Giờ vàng 11:00 UTC -> chạy 10:23 UTC
-    # = 4:30 PM Ấn Độ (vừa tan học), 7:00 PM Manila / Kuala Lumpur / Singapore (giờ gia đình),
-    #   7:00 AM New York (trẻ mầm non xem buổi sáng; cuối tuần là giờ hoạt hình sáng).
-    #   = 18:00 giờ Việt Nam.
-    - cron: "23 10 * * *"
-
-    # Giờ vàng 13:00 UTC -> chạy 12:23 UTC (trước chỉ T7, CN — nay mở rộng cả tuần)
-    # = 6:30 PM Ấn Độ (giờ gia đình, thị trường số 2), 9:00 AM New York / Toronto
-    #   (ngày thường: trẻ mầm non ở nhà; cuối tuần: giờ hoạt hình sáng — cao điểm lớn nhất tuần ở Mỹ),
-    #   2:00 PM London. = 20:00 giờ Việt Nam.
-    - cron: "23 12 * * *"
-
-    # Giờ vàng 15:00 UTC -> chạy 14:23 UTC
-    # = 4:00 PM London (tan học), 8:30 PM Ấn Độ, 4:00 PM Lagos, 11:00 AM New York (cuối tuần),
-    #   8:00 AM Los Angeles (cuối tuần). = 22:00 giờ Việt Nam.
-    - cron: "23 14 * * *"
-
-    # Giờ vàng 17:00 UTC -> chạy 16:23 UTC (trước chỉ T6, T7, CN — nay mở rộng cả tuần)
-    # = 6:00 PM London (tan học, sau bữa tối), 1:00 PM New York, 10:00 AM Los Angeles.
-    #   = 00:00 giờ Việt Nam.
-    - cron: "23 16 * * *"
-
-    # Giờ vàng 23:00 UTC -> chạy 22:23 UTC
-    # = 7:00 PM New York / Toronto (giờ trước khi ngủ, bố mẹ mở cho con xem),
-    #   4:00 PM Los Angeles (tan học bờ Tây), 10:00 AM Sydney hôm sau. = 06:00 sáng giờ Việt Nam.
-    - cron: "23 22 * * *"
-
-    # ---------- NGÀY THƯỜNG (T2–T6) ----------
-
-    # Giờ vàng 08:00 UTC -> chạy 07:23 UTC
-    # = 7:00 PM Sydney / Melbourne, 9:00 PM Auckland, 4:00 PM Manila / Singapore (tan học),
-    #   1:30 PM Ấn Độ. = 15:00 giờ Việt Nam.
-    - cron: "23 7 * * 1-5"
-
-    # Giờ vàng 19:00 UTC -> chạy 18:23 UTC
-    # = 3:00 PM New York / Toronto (vừa tan học bờ Đông Mỹ & Canada), 12:00 PM Los Angeles,
-    #   8:00 PM London. = 02:00 sáng giờ Việt Nam.
-    - cron: "23 18 * * 1-5"
-
-    # Giờ vàng 21:00 UTC -> chạy 20:23 UTC
-    # = 5:00 PM New York / Toronto (khung xem nhiều nhất sau giờ học), 2:00 PM Los Angeles.
-    #   = 04:00 sáng giờ Việt Nam.
-    - cron: "23 20 * * 1-5"
-
-    # ---------- CUỐI TUẦN (T7, CN) ----------
-
-    # Giờ vàng 07:00 UTC -> chạy 06:23 UTC
-    # = 8:00 AM London (sáng cuối tuần), 6:00 PM Sydney, 3:00 PM Manila, 12:30 PM Ấn Độ.
-    #   = 14:00 giờ Việt Nam.
-    - cron: "23 6 * * 0,6"
-
-    # Giờ vàng 09:00 UTC -> chạy 08:23 UTC
-    # = 10:00 AM London, 2:30 PM Ấn Độ, 5:00 PM Manila / Singapore, 8:00 PM Sydney,
-    #   10:00 AM Lagos. = 16:00 giờ Việt Nam.
-    - cron: "23 8 * * 0,6"
-
-    # Giờ vàng 20:00 UTC -> chạy 19:23 UTC
-    # = 4:00 PM New York, 1:00 PM Los Angeles (chiều cuối tuần ở nhà), 9:00 PM London.
-    #   = 03:00 sáng giờ Việt Nam.
-    - cron: "23 19 * * 0,6"
+    # ---------- CUỐI TUẦN (T7, CN) — 9 video, trẻ ở nhà cả ngày ----------
+    # 01:00 UTC (00:23) — 8:00 PM New York, 5:00 PM Los Angeles, 12:00 PM Sydney. = 08:00 VN.
+    # 08:00 UTC (07:23) — 8:00 AM London (sáng cuối tuần Anh), 7:00 PM Sydney, 9:00 PM Auckland. = 15:00 VN.
+    # 10:00 UTC (09:23) — 10:00 AM London / Dublin (cao điểm sáng cuối tuần Anh). = 17:00 VN.
+    # 12:00 UTC (11:23) — 7:00 AM New York (trẻ Mỹ dậy xem hoạt hình), 12:00 PM London. = 19:00 VN.
+    # 14:00 UTC (13:23) — 9:00 AM New York / Toronto (CAO ĐIỂM LỚN NHẤT TUẦN ở Mỹ),
+    #   6:00 AM Los Angeles, 2:00 PM London. = 21:00 VN.
+    # 16:00 UTC (15:23) — 11:00 AM New York, 8:00 AM Los Angeles (sáng cuối tuần bờ Tây),
+    #   4:00 PM London. = 23:00 VN.
+    # 18:00 UTC (17:23) — 1:00 PM New York, 10:00 AM Los Angeles, 6:00 PM London. = 01:00 VN.
+    # 20:00 UTC (19:23) — 3:00 PM New York, 12:00 PM Los Angeles, 7:00 AM Sydney. = 03:00 VN.
+    # 23:00 UTC (22:23) — 6:00 PM New York / Toronto, 3:00 PM Los Angeles, 10:00 AM Sydney. = 06:00 VN.
+    - cron: "23 0,7,9,11,13,15,17,19,22 * * 0,6"
 
 # Chỉ 1 lượt chạy tại 1 thời điểm. Lưu ý: GitHub chỉ giữ tối đa 1 lượt chờ — nếu 1 lượt dựng
 # lâu hơn 2 tiếng, lượt chờ cũ sẽ bị thay bằng lượt mới hơn (mất 1 video).
